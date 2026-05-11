@@ -1,0 +1,188 @@
+import logging
+import pytz
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+
+from db import get_due_suggestions, update_suggestion, is_news_posted, mark_news_posted
+from prices import get_price
+from news import fetch_news
+
+IST = pytz.timezone("Asia/Kolkata")
+
+MARKET_EMOJI    = {"india": "🇮🇳", "us": "🇺🇸", "crypto": "🪙", "realestate": "🏠"}
+CURRENCY_SYMBOL = {"india": "₹",   "us": "$",    "crypto": "$",  "realestate": "₹"}
+
+# Channel names → market mapping for news
+NEWS_CHANNELS = {
+    "india":       "dalal-street-neeti",
+    "us":          "wall-street-neeti",
+    "crypto":      "crypto-kautilya",
+    "realestate":  "realty-rajniti",
+}
+
+BRIEFING_LABELS = {
+    "morning":   ("🌅", "Morning Briefing"),
+    "afternoon": ("☀️",  "Midday Update"),
+    "evening":   ("🌆", "Evening Wrap"),
+}
+
+
+# ── News posting ──────────────────────────────────────────────────────────────
+
+def post_news(app, slot):
+    """Fetch and post top news to each investment channel."""
+    emoji, label = BRIEFING_LABELS[slot]
+    logging.info(f"Posting {label} news...")
+
+    # Resolve channel name → channel ID
+    try:
+        result = app.client.conversations_list(limit=200, types="public_channel")
+        channel_map = {c["name"]: c["id"] for c in result["channels"]}
+    except Exception as e:
+        logging.error(f"Could not fetch channel list: {e}")
+        return
+
+    for market, channel_name in NEWS_CHANNELS.items():
+        channel_id = channel_map.get(channel_name)
+        if not channel_id:
+            logging.warning(f"Channel #{channel_name} not found, skipping.")
+            continue
+
+        articles = fetch_news(market, max_items=8)
+        # Filter already posted
+        fresh = [a for a in articles if not is_news_posted(a["url"])][:4]
+
+        if not fresh:
+            logging.info(f"No fresh news for {market}, skipping.")
+            continue
+
+        market_emoji = MARKET_EMOJI.get(market, "📈")
+        blocks = [
+            {
+                "type": "header",
+                "text": {"type": "plain_text", "text": f"{emoji} {label} — {market_emoji} {channel_name.replace('-', ' ').title()}"}
+            },
+            {"type": "divider"}
+        ]
+
+        for i, article in enumerate(fresh, 1):
+            blocks.append({
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*{i}. <{article['url']}|{article['title']}>*\n_{article['source']}_"
+                            + (f"\n{article['summary']}" if article["summary"] else "")
+                }
+            })
+            if i < len(fresh):
+                blocks.append({"type": "divider"})
+
+        blocks.append({
+            "type": "context",
+            "elements": [{"type": "mrkdwn", "text": f"Auto-posted by Chanakya Bot • {label}"}]
+        })
+
+        try:
+            app.client.chat_postMessage(
+                channel=channel_id,
+                text=f"{label} — {market_emoji} Top News",
+                blocks=blocks
+            )
+            mark_news_posted([a["url"] for a in fresh])
+            logging.info(f"Posted {len(fresh)} news items to #{channel_name}")
+        except Exception as e:
+            logging.error(f"Failed to post news to #{channel_name}: {e}")
+
+
+# ── Review checker ────────────────────────────────────────────────────────────
+
+def check_due_suggestions(app):
+    due = get_due_suggestions()
+    if not due:
+        logging.info("No due suggestions to review.")
+        return
+
+    logging.info(f"Reviewing {len(due)} due suggestion(s)...")
+
+    for s in due:
+        ticker     = s["ticker"]
+        market     = s["market"]
+        entry_price = float(s["entry_price"])
+        expected_roi = float(s["expected_roi"])
+        days       = s["tracking_days"]
+        currency   = CURRENCY_SYMBOL.get(market, "")
+        emoji      = MARKET_EMOJI.get(market, "📈")
+
+        current_price, price_display, _ = get_price(ticker, market)
+        if current_price is None:
+            logging.warning(f"Could not fetch price for {ticker}, skipping.")
+            continue
+
+        actual_roi = ((current_price - entry_price) / entry_price) * 100
+        update_suggestion(s["id"], current_price, actual_roi)
+
+        if actual_roi >= expected_roi:
+            status = "🟢 Target Hit!"
+        elif actual_roi >= 0:
+            status = "🟡 On Track"
+        else:
+            status = "🔴 In Loss"
+
+        try:
+            app.client.chat_postMessage(
+                channel=s["channel_id"],
+                text=f"{days}-Day Review: {ticker} | {actual_roi:+.2f}%",
+                blocks=[
+                    {"type": "header", "text": {"type": "plain_text", "text": f"📊 {days}-Day Review: {ticker} {emoji}"}},
+                    {
+                        "type": "section",
+                        "fields": [
+                            {"type": "mrkdwn", "text": f"*Entry Price:*\n{currency}{entry_price:,.2f}"},
+                            {"type": "mrkdwn", "text": f"*Current Price:*\n{currency}{current_price:,.2f}"},
+                            {"type": "mrkdwn", "text": f"*Expected ROI:*\n+{expected_roi:.1f}%"},
+                            {"type": "mrkdwn", "text": f"*Actual Gain:*\n{actual_roi:+.2f}%"},
+                        ]
+                    },
+                    {"type": "section", "text": {"type": "mrkdwn", "text": f"*Status:* {status}"}},
+                    {"type": "context", "elements": [
+                        {"type": "mrkdwn", "text": f"Suggested by <@{s['user_id']}> • Tracked for {days} days"}
+                    ]}
+                ]
+            )
+        except Exception as e:
+            logging.error(f"Failed to post review for suggestion {s['id']}: {e}")
+
+
+# ── Scheduler setup ───────────────────────────────────────────────────────────
+
+def start_scheduler(app):
+    scheduler = BackgroundScheduler(timezone=IST)
+
+    # News: 8 AM IST
+    scheduler.add_job(
+        lambda: post_news(app, "morning"),
+        CronTrigger(hour=8, minute=0, timezone=IST),
+        id="news_morning"
+    )
+    # News: 1 PM IST
+    scheduler.add_job(
+        lambda: post_news(app, "afternoon"),
+        CronTrigger(hour=13, minute=0, timezone=IST),
+        id="news_afternoon"
+    )
+    # News: 6 PM IST
+    scheduler.add_job(
+        lambda: post_news(app, "evening"),
+        CronTrigger(hour=18, minute=0, timezone=IST),
+        id="news_evening"
+    )
+    # Portfolio review: every 6 hours
+    scheduler.add_job(
+        lambda: check_due_suggestions(app),
+        "interval", hours=6,
+        id="review_job"
+    )
+
+    scheduler.start()
+    logging.info("Scheduler started — news at 8 AM / 1 PM / 6 PM IST, reviews every 6h")
+    return scheduler
