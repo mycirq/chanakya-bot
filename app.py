@@ -20,6 +20,14 @@ TICKER_HINT     = {
     "realestate":  "Property name or location",
 }
 
+def _post_reply(client, channel_id, user_id, text, blocks=None):
+    """Use ephemeral in channels, plain DM in direct messages."""
+    if channel_id.startswith("D"):
+        client.chat_postMessage(channel=channel_id, text=text, blocks=blocks)
+    else:
+        client.chat_postEphemeral(channel=channel_id, user=user_id, text=text, blocks=blocks)
+
+
 MARKET_OPTIONS = [
     {"text": {"type": "plain_text", "text": "🇮🇳  Indian Stock Market"}, "value": "india"},
     {"text": {"type": "plain_text", "text": "🇺🇸  US Stock Market"},     "value": "us"},
@@ -439,8 +447,7 @@ def handle_remove_modal_submit(ack, body, client, view):
 
     checked = values.get("suggestions_block", {}).get("suggestions_check", {}).get("selected_options", [])
     if not checked:
-        client.chat_postEphemeral(channel=channel_id, user=requester_id,
-                                  text="No suggestions selected — nothing was removed.")
+        _post_reply(client, channel_id, requester_id, "No suggestions selected — nothing was removed.")
         return
 
     selected_uid = meta[2] if len(meta) > 2 and meta[2] else requester_id
@@ -458,10 +465,8 @@ def handle_remove_modal_submit(ack, body, client, view):
             removed.append(f"{emoji} *{s['ticker']}* (entry: {currency}{float(s['entry_price']):,.2f})")
 
     lines = "\n".join(f"• {r}" for r in removed)
-    client.chat_postEphemeral(
-        channel=channel_id, user=requester_id,
-        text=f"🗑️ Removed {len(removed)} suggestion(s):\n{lines}"
-    )
+    _post_reply(client, channel_id, requester_id,
+                f"🗑️ Removed {len(removed)} suggestion(s):\n{lines}")
 
 
 # ── /portfolio command ────────────────────────────────────────────────────────
@@ -536,8 +541,7 @@ def handle_portfolio_view(ack, body, client, view):
     suggestions = get_active_suggestions(user_id=uid, market=market)
 
     if not suggestions:
-        client.chat_postEphemeral(channel=channel_id, user=requester,
-                                  text="No active suggestions found for that filter.")
+        _post_reply(client, channel_id, requester, "No active suggestions found for that filter.")
         return
 
     user_label   = "Everyone" if not uid else f"<@{uid}>"
@@ -571,8 +575,8 @@ def handle_portfolio_view(ack, body, client, view):
         })
         blocks.append({"type": "divider"})
 
-    client.chat_postEphemeral(channel=channel_id, user=requester,
-                              text=f"Portfolio — {user_label} · {market_label}", blocks=blocks)
+    _post_reply(client, channel_id, requester,
+                f"Portfolio — {user_label} · {market_label}", blocks=blocks)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
