@@ -42,12 +42,40 @@ def get_price(ticker, market):
     return None, None, None
 
 
+HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+
+
 def _get_yfinance_price(symbol, currency_symbol):
     import yfinance as yf
     ticker = yf.Ticker(symbol)
-    price = ticker.fast_info.last_price
-    if price and price > 0:
-        return float(price), f"{currency_symbol}{price:,.2f}", currency_symbol
+
+    # Try fast_info first
+    try:
+        price = ticker.fast_info.last_price
+        if price and price > 0:
+            return float(price), f"{currency_symbol}{price:,.2f}", currency_symbol
+    except Exception:
+        pass
+
+    # Fallback: recent history
+    try:
+        hist = ticker.history(period="1d")
+        if not hist.empty:
+            price = float(hist["Close"].iloc[-1])
+            if price > 0:
+                return price, f"{currency_symbol}{price:,.2f}", currency_symbol
+    except Exception:
+        pass
+
+    # Fallback: ticker.info
+    try:
+        info = ticker.info
+        price = info.get("currentPrice") or info.get("regularMarketPrice")
+        if price and price > 0:
+            return float(price), f"{currency_symbol}{price:,.2f}", currency_symbol
+    except Exception:
+        pass
+
     return None, None, None
 
 
@@ -57,27 +85,40 @@ def _get_crypto_price(ticker):
 
     # Direct ID lookup
     url = f"https://api.coingecko.com/api/v3/simple/price?ids={ticker_lower}&vs_currencies=usd"
-    resp = requests.get(url, timeout=10)
-    data = resp.json()
-
-    if ticker_lower in data:
-        price = data[ticker_lower]["usd"]
-        return float(price), f"${price:,.4f}", "$"
+    resp = requests.get(url, timeout=10, headers=HEADERS)
+    if resp.status_code == 200:
+        data = resp.json()
+        if ticker_lower in data:
+            price = data[ticker_lower]["usd"]
+            return float(price), f"${price:,.4f}", "$"
 
     # Fallback: search by symbol
     search_url = f"https://api.coingecko.com/api/v3/search?query={ticker_lower}"
-    search_resp = requests.get(search_url, timeout=10)
-    search_data = search_resp.json()
+    search_resp = requests.get(search_url, timeout=10, headers=HEADERS)
+    if search_resp.status_code == 200:
+        coins = search_resp.json().get("coins", [])
+        if coins:
+            coin_id = coins[0]["id"]
+            price_url = f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd"
+            price_resp = requests.get(price_url, timeout=10, headers=HEADERS)
+            if price_resp.status_code == 200:
+                price_data = price_resp.json()
+                if coin_id in price_data:
+                    price = price_data[coin_id]["usd"]
+                    return float(price), f"${price:,.4f}", "$"
 
-    coins = search_data.get("coins", [])
-    if coins:
-        coin_id = coins[0]["id"]
-        price_url = f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd"
-        price_resp = requests.get(price_url, timeout=10)
-        price_data = price_resp.json()
-        if coin_id in price_data:
-            price = price_data[coin_id]["usd"]
-            return float(price), f"${price:,.4f}", "$"
+    # Last resort: CoinCap API (no rate limits, no key needed)
+    try:
+        coincap_url = f"https://api.coincap.io/v2/assets/{ticker_lower}"
+        coincap_resp = requests.get(coincap_url, timeout=8, headers=HEADERS)
+        if coincap_resp.status_code == 200:
+            asset = coincap_resp.json().get("data", {})
+            price_str = asset.get("priceUsd")
+            if price_str:
+                price = float(price_str)
+                return price, f"${price:,.4f}", "$"
+    except Exception:
+        pass
 
     return None, None, None
 
