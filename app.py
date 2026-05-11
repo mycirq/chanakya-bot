@@ -2,7 +2,7 @@ import os
 import logging
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
-from db import init_db, save_suggestion, get_active_suggestions, get_distinct_users, is_duplicate
+from db import init_db, save_suggestion, get_active_suggestions, get_distinct_users, is_duplicate, remove_suggestion
 from prices import get_price, search_tickers
 from scheduler import start_scheduler
 
@@ -329,6 +329,132 @@ def handle_modal_submit(ack, body, client, view):
     ]
 
     client.chat_postMessage(channel=channel_id, text=f"New {label} suggestion: {ticker}", blocks=blocks)
+
+
+# ── /remove-suggestion command ────────────────────────────────────────────────
+
+def _build_remove_modal(channel_id, requester_id, selected_uid=None):
+    """Build remove modal. Step 1: pick user. Step 2: show their suggestions as checkboxes."""
+    distinct_users = get_distinct_users()
+    user_options = [{"text": {"type": "plain_text", "text": "👤 My suggestions"}, "value": requester_id}]
+    for uid in distinct_users:
+        if uid != requester_id:
+            user_options.append({"text": {"type": "plain_text", "text": f"<@{uid}>"}, "value": uid})
+
+    user_block = {
+        "type": "input",
+        "block_id": "user_pick_block",
+        "dispatch_action": True,
+        "label": {"type": "plain_text", "text": "Whose portfolio?"},
+        "element": {
+            "type": "static_select",
+            "action_id": "remove_user_pick",
+            "placeholder": {"type": "plain_text", "text": "Select a member..."},
+            "options": user_options,
+        }
+    }
+
+    if selected_uid:
+        user_block["element"]["initial_option"] = next(
+            (o for o in user_options if o["value"] == selected_uid),
+            user_options[0]
+        )
+
+    blocks = [user_block]
+
+    if selected_uid:
+        suggestions = get_active_suggestions(user_id=selected_uid)
+        if suggestions:
+            checkbox_options = []
+            for s in suggestions:
+                emoji = MARKET_EMOJI.get(s["market"], "📈")
+                currency = CURRENCY_SYMBOL.get(s["market"], "")
+                label = f"{emoji} {s['ticker']} — Entry: {currency}{float(s['entry_price']):,.2f}"
+                checkbox_options.append({
+                    "text": {"type": "mrkdwn", "text": label},
+                    "value": str(s["id"])
+                })
+            blocks.append({
+                "type": "input",
+                "block_id": "suggestions_block",
+                "label": {"type": "plain_text", "text": "Select suggestions to remove"},
+                "element": {
+                    "type": "checkboxes",
+                    "action_id": "suggestions_check",
+                    "options": checkbox_options
+                }
+            })
+        else:
+            blocks.append({
+                "type": "section",
+                "block_id": "no_suggestions_block",
+                "text": {"type": "mrkdwn", "text": "_No active suggestions for this user._"}
+            })
+
+    return {
+        "type": "modal",
+        "callback_id": "remove_suggestion_modal",
+        "private_metadata": f"{channel_id}|{requester_id}|{selected_uid or ''}",
+        "title": {"type": "plain_text", "text": "Remove Suggestion"},
+        "submit": {"type": "plain_text", "text": "Remove Selected"},
+        "close": {"type": "plain_text", "text": "Cancel"},
+        "blocks": blocks
+    }
+
+
+@app.command("/remove-suggestion")
+def handle_remove_suggestion(ack, command, client):
+    ack()
+    client.views_open(
+        trigger_id=command["trigger_id"],
+        view=_build_remove_modal(command["channel_id"], command["user_id"])
+    )
+
+
+@app.action("remove_user_pick")
+def handle_remove_user_pick(ack, body, client, action):
+    ack()
+    selected_uid = action["selected_option"]["value"]
+    meta = body["view"]["private_metadata"].split("|")
+    channel_id, requester_id = meta[0], meta[1]
+    client.views_update(
+        view_id=body["view"]["id"],
+        view=_build_remove_modal(channel_id, requester_id, selected_uid)
+    )
+
+
+@app.view("remove_suggestion_modal")
+def handle_remove_modal_submit(ack, body, client, view):
+    ack()
+    meta = view["private_metadata"].split("|")
+    channel_id, requester_id = meta[0], meta[1]
+    values = view["state"]["values"]
+
+    checked = values.get("suggestions_block", {}).get("suggestions_check", {}).get("selected_options", [])
+    if not checked:
+        client.chat_postEphemeral(channel=channel_id, user=requester_id,
+                                  text="No suggestions selected — nothing was removed.")
+        return
+
+    selected_uid = meta[2] if len(meta) > 2 and meta[2] else requester_id
+    all_suggestions = get_active_suggestions(user_id=selected_uid)
+    id_to_suggestion = {str(s["id"]): s for s in all_suggestions}
+
+    removed = []
+    for opt in checked:
+        sid = opt["value"]
+        s = id_to_suggestion.get(sid)
+        remove_suggestion(int(sid), selected_uid)
+        if s:
+            emoji = MARKET_EMOJI.get(s["market"], "📈")
+            currency = CURRENCY_SYMBOL.get(s["market"], "")
+            removed.append(f"{emoji} *{s['ticker']}* (entry: {currency}{float(s['entry_price']):,.2f})")
+
+    lines = "\n".join(f"• {r}" for r in removed)
+    client.chat_postEphemeral(
+        channel=channel_id, user=requester_id,
+        text=f"🗑️ Removed {len(removed)} suggestion(s):\n{lines}"
+    )
 
 
 # ── /portfolio command ────────────────────────────────────────────────────────

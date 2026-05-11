@@ -122,6 +122,15 @@ if DATABASE_URL.startswith("sqlite"):
         conn.commit()
         conn.close()
 
+    def remove_suggestion(suggestion_id, user_id):
+        """Delete a suggestion — only if it belongs to the user."""
+        conn = get_conn()
+        conn.execute("""
+            DELETE FROM suggestions WHERE id = ? AND user_id = ?
+        """, (suggestion_id, user_id))
+        conn.commit()
+        conn.close()
+
 else:
     import psycopg2
     from psycopg2.extras import RealDictCursor
@@ -263,6 +272,17 @@ else:
             SET reviewed = TRUE, exit_price = %s, actual_roi = %s
             WHERE id = %s
         """, (exit_price, actual_roi, suggestion_id))
+        conn.commit()
+        cur.close()
+        conn.close()
+
+    def remove_suggestion(suggestion_id, user_id):
+        """Delete a suggestion — only if it belongs to the user."""
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            DELETE FROM suggestions WHERE id = %s AND user_id = %s
+        """, (suggestion_id, user_id))
         conn.commit()
         cur.close()
         conn.close()
