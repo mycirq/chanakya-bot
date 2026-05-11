@@ -146,6 +146,13 @@ def build_suggest_modal(channel_id, channel_name, selected_market=None):
 @app.command("/suggest")
 def handle_suggest(ack, command, client):
     ack()
+    if command["channel_name"] != "artha-manthan":
+        client.chat_postEphemeral(
+            channel=command["channel_id"],
+            user=command["user_id"],
+            text="📍 Please use `/suggest` in <#artha-manthan> — that's the dedicated picks channel."
+        )
+        return
     client.views_open(
         trigger_id=command["trigger_id"],
         view=build_suggest_modal(command["channel_id"], command["channel_name"])
