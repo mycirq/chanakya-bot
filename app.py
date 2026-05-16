@@ -874,8 +874,14 @@ if __name__ == "__main__":
     handler = SocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])
     try:
         import requests as _req
+        from trader.config import OWNER_SLACK_ID
         _ip = _req.get("https://api4.ipify.org", timeout=5).text.strip()
-        logging.info(f"Server outbound IP: {_ip} — add to Binance whitelist if needed")
+        logging.info(f"Server outbound IP: {_ip}")
+        # DM owner with new IP on every startup so Binance whitelist can be updated
+        app.client.chat_postMessage(
+            channel=OWNER_SLACK_ID,
+            text=f"🚀 Bot started. Server IP: `{_ip}`\nIf Binance trades fail, add this IP to whitelist at binance.com/en/my/settings/api-management"
+        )
     except Exception:
         pass
     logging.info("Chanakya Bot is running...")
