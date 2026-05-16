@@ -28,9 +28,10 @@ def compute_indicators(ohlcv):
     df["ema_fast"] = ta.ema(df["close"], length=EMA_FAST)
     df["ema_slow"] = ta.ema(df["close"], length=EMA_SLOW)
     bb = ta.bbands(df["close"], length=BB_PERIOD, std=BB_STD)
-    df["bb_upper"] = bb[f"BBU_{BB_PERIOD}_{float(BB_STD)}"]
-    df["bb_lower"] = bb[f"BBL_{BB_PERIOD}_{float(BB_STD)}"]
-    df["bb_mid"]   = bb[f"BBM_{BB_PERIOD}_{float(BB_STD)}"]
+    bb_cols = bb.columns.tolist()
+    df["bb_upper"] = bb[[c for c in bb_cols if c.startswith("BBU_")][0]]
+    df["bb_lower"] = bb[[c for c in bb_cols if c.startswith("BBL_")][0]]
+    df["bb_mid"]   = bb[[c for c in bb_cols if c.startswith("BBM_")][0]]
     df["vol_ma"]   = df["volume"].rolling(20).mean()
 
     return df.dropna()

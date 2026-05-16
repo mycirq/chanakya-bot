@@ -643,7 +643,7 @@ def handle_trade_test(ack, command, client):
 
         symbol   = "ETH/USDT:USDT"
         leverage = 1
-        margin   = 20.0  # $20 — Binance futures minimum notional
+        margin   = 25.0  # $25 — safely above Binance $20 minimum notional
 
         # Fetch current ETH price
         ticker      = ex.fetch_ticker(symbol)
