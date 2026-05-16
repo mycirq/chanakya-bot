@@ -114,49 +114,65 @@ def login_with_totp(totp_value: str) -> str:
     password   = os.environ["KITE_PASSWORD"]
 
     sess = requests.Session()
-    sess.headers.update({"User-Agent": "Mozilla/5.0"})
+    sess.headers.update({
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+    })
 
-    # Step 1: Init connect session
-    sess.get(
-        f"https://kite.zerodha.com/connect/login?v=3&api_key={api_key}",
-        allow_redirects=True
-    )
-
-    # Step 2: Login with credentials
+    # Step 1: Login — do NOT visit connect/login first
     login_resp = sess.post("https://kite.zerodha.com/api/login", data={
         "user_id":  user_id,
         "password": password,
     })
     login_data = login_resp.json()
+    logger.info(f"Kite login response: {login_data.get('status')} {login_data.get('message','')}")
     if login_data.get("status") != "success":
         raise Exception(f"Kite login failed: {login_data.get('message', login_data)}")
     request_id = login_data["data"]["request_id"]
 
-    # Step 3: Submit TOTP — catch redirect manually
+    # Step 2: Submit TOTP
     twofa_resp = sess.post("https://kite.zerodha.com/api/twofa", data={
         "user_id":     user_id,
         "request_id":  request_id,
         "twofa_value": str(totp_value).strip(),
         "twofa_type":  "totp",
-    }, allow_redirects=False)
+    })
+    twofa_data = twofa_resp.json()
+    logger.info(f"Kite 2FA response: {twofa_data.get('status')} {twofa_data.get('message','')}")
+    if twofa_data.get("status") != "success":
+        raise Exception(f"Kite TOTP failed: {twofa_data.get('message', twofa_data)}")
 
-    # Follow redirects manually until we reach the redirect_url
-    location = twofa_resp.headers.get("Location", "")
+    # Step 3: Session is now authenticated — hit connect/login to get request_token
+    # After successful login+2FA, Kite redirects to redirect_url?request_token=xxx
+    connect_resp = sess.get(
+        f"https://kite.zerodha.com/connect/login?v=3&api_key={api_key}",
+        allow_redirects=False
+    )
+    location = connect_resp.headers.get("Location", "")
+    logger.info(f"Connect/login location: {location[:80] if location else 'none'}")
+
+    # Follow redirect chain until we hit redirect_url (127.0.0.1)
     hops = 0
-    while location and "127.0.0.1" not in location and hops < 5:
+    while location and "127.0.0.1" not in location and hops < 6:
         r = sess.get(location, allow_redirects=False)
         location = r.headers.get("Location", "")
+        logger.info(f"Redirect hop {hops+1}: {location[:80] if location else 'none'}")
         hops += 1
 
-    if not location:
-        raise Exception("TOTP redirect chain failed — no redirect URL found")
+    if not location or "request_token" not in location:
+        raise Exception(
+            f"Could not get request_token after {hops} hops. Last location: {location!r}"
+        )
 
     parsed = urllib.parse.urlparse(location)
     params = urllib.parse.parse_qs(parsed.query)
     request_token = params.get("request_token", [None])[0]
 
     if not request_token:
-        raise Exception(f"request_token missing in redirect: {location}")
+        raise Exception(f"request_token missing in: {location}")
+
+    logger.info(f"Got request_token: {request_token[:10]}...")
 
     # Step 4: Generate access token
     kite = KiteConnect(api_key=api_key)
@@ -171,6 +187,7 @@ def login_with_totp(totp_value: str) -> str:
         _kite = KiteConnect(api_key=api_key)
     _kite.set_access_token(access_token)
 
+    logger.info("Kite login successful — access token stored")
     return access_token
 
 
