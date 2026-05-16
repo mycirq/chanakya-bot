@@ -141,13 +141,16 @@ def login_with_totp(totp_value: str) -> str:
     if login_data.get("status") != "success":
         raise Exception(f"Kite login failed: {login_data.get('message', login_data)}")
     request_id = login_data["data"]["request_id"]
+    # Use whatever 2FA type the account has configured (totp, app_code, etc.)
+    twofa_type = login_data["data"].get("twofa_type", "totp")
+    logger.info(f"Kite twofa_type from login response: {twofa_type}")
 
     # Step 2: Submit TOTP
     twofa_resp = sess.post("https://kite.zerodha.com/api/twofa", data={
         "user_id":     user_id,
         "request_id":  request_id,
         "twofa_value": str(totp_value).strip(),
-        "twofa_type":  "totp",
+        "twofa_type":  twofa_type,
     })
     twofa_data = twofa_resp.json()
     logger.info(f"Kite 2FA response: {twofa_data.get('status')} {twofa_data.get('message','')}")
