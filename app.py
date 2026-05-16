@@ -671,7 +671,7 @@ def handle_trade_test(ack, command, client):
         _post_reply(client, channel_id, user_id,
             f"✅ *Test order placed!*\n"
             f"• Symbol: `{symbol}` | Side: LONG | 1x\n"
-            f"• Amount: `{amount} BTC` | Limit: `${float(limit_price):,.2f}`\n"
+            f"• Amount: `{amount} ETH` | Limit: `${float(limit_price):,.2f}`\n"
             f"• Order ID: `{order['id']}`\n"
             f"• Wallet balance: `${balance:.2f} USDT`\n"
             f"_Binance connection is working. Cancel this order manually on Binance._"
