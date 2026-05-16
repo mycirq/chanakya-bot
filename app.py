@@ -872,5 +872,11 @@ if __name__ == "__main__":
         logging.warning(f"Could not init Kite month snapshot: {_e}")
     start_scheduler(app)
     handler = SocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])
+    try:
+        import requests as _req
+        _ip = _req.get("https://api4.ipify.org", timeout=5).text.strip()
+        logging.info(f"Server outbound IP: {_ip} — add to Binance whitelist if needed")
+    except Exception:
+        pass
     logging.info("Chanakya Bot is running...")
     handler.start()
