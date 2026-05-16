@@ -698,11 +698,11 @@ if __name__ == "__main__":
     from trader.config import MONTHLY_TARGET_PCT
     init_trader_db()
     # Seed month snapshot on startup if not already set for this month
-    if not get_month_snapshot():
-        try:
+    try:
+        if not get_month_snapshot():
             init_month_snapshot(get_futures_balance(), MONTHLY_TARGET_PCT)
-        except Exception as _e:
-            logging.warning(f"Could not init month snapshot on startup: {_e}")
+    except Exception as _e:
+        logging.warning(f"Could not init month snapshot on startup: {_e}")
     start_scheduler(app)
     handler = SocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])
     logging.info("Chanakya Bot is running...")

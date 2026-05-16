@@ -209,10 +209,10 @@ def start_scheduler(app):
         id="month_start_snapshot"
     )
 
-    # Month end (last day of month, 9 PM IST): post summary
+    # Month end check: runs daily at 9 PM IST, posts summary only on the last day of the month
     scheduler.add_job(
         lambda: _run_month_end_summary(app),
-        CronTrigger(day="last", hour=21, minute=0, timezone=IST),
+        CronTrigger(hour=21, minute=0, timezone=IST),
         id="month_end_summary"
     )
 
@@ -222,6 +222,12 @@ def start_scheduler(app):
 
 
 def _run_month_end_summary(app):
+    import calendar
+    from datetime import datetime
+    now = datetime.now(IST)
+    last_day = calendar.monthrange(now.year, now.month)[1]
+    if now.day != last_day:
+        return  # not the last day of the month
     snapshot = get_month_snapshot()
     if not snapshot:
         logging.warning("Month-end summary: no snapshot found for current month")
