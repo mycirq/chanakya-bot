@@ -7,6 +7,10 @@ from db import get_due_suggestions, update_suggestion, is_news_posted, mark_news
 from prices import get_price
 from news import fetch_news
 from trader.engine import run_scan, run_daily_summary
+from trader.memory import init_month_snapshot, get_month_snapshot, get_trade_stats
+from trader.binance import get_futures_balance
+from trader.reporter import post_month_end_summary
+from trader.config import MONTHLY_TARGET_PCT
 
 IST = pytz.timezone("Asia/Kolkata")
 
@@ -198,6 +202,30 @@ def start_scheduler(app):
         id="daily_summary"
     )
 
+    # Month start (1st of each month, 6 AM IST): snapshot starting balance
+    scheduler.add_job(
+        lambda: init_month_snapshot(get_futures_balance(), MONTHLY_TARGET_PCT),
+        CronTrigger(day=1, hour=6, minute=0, timezone=IST),
+        id="month_start_snapshot"
+    )
+
+    # Month end (last day of month, 9 PM IST): post summary
+    scheduler.add_job(
+        lambda: _run_month_end_summary(app),
+        CronTrigger(day="last", hour=21, minute=0, timezone=IST),
+        id="month_end_summary"
+    )
+
     scheduler.start()
-    logging.info("Scheduler started — news 8AM/1PM/6PM IST, reviews every 6h, crypto scan every 15min")
+    logging.info("Scheduler started — news 8AM/1PM/6PM IST, reviews every 6h, crypto scan every 15min, month-end review")
     return scheduler
+
+
+def _run_month_end_summary(app):
+    snapshot = get_month_snapshot()
+    if not snapshot:
+        logging.warning("Month-end summary: no snapshot found for current month")
+        return
+    stats   = get_trade_stats()
+    balance = get_futures_balance()
+    post_month_end_summary(app.client, snapshot, stats, balance)

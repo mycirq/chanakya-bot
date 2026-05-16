@@ -8,6 +8,87 @@ from db import get_conn
 logger = logging.getLogger(__name__)
 
 
+def init_month_snapshot(balance_usdt, target_pct):
+    """Called on 1st of each month — saves starting balance + target."""
+    conn = get_conn()
+    if hasattr(conn, 'cursor'):
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS month_snapshots (
+                id SERIAL PRIMARY KEY,
+                month VARCHAR(7) NOT NULL,
+                start_balance DECIMAL(20,8),
+                target_pct DECIMAL(10,2),
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        cur.execute("""
+            INSERT INTO month_snapshots (month, start_balance, target_pct)
+            VALUES (%s, %s, %s)
+            ON CONFLICT DO NOTHING
+        """, (get_current_month(), balance_usdt, target_pct))
+        conn.commit(); cur.close()
+    else:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS month_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                month TEXT NOT NULL UNIQUE,
+                start_balance REAL,
+                target_pct REAL,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        conn.execute("""
+            INSERT OR IGNORE INTO month_snapshots (month, start_balance, target_pct)
+            VALUES (?, ?, ?)
+        """, (get_current_month(), balance_usdt, target_pct))
+        conn.commit()
+    conn.close()
+
+
+def get_month_snapshot():
+    """Get this month's starting balance + target."""
+    conn = get_conn()
+    month = get_current_month()
+    if hasattr(conn, 'cursor'):
+        from psycopg2.extras import RealDictCursor
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM month_snapshots WHERE month = %s", (month,))
+        row = cur.fetchone()
+        cur.close()
+    else:
+        row = conn.execute(
+            "SELECT * FROM month_snapshots WHERE month = ?", (month,)
+        ).fetchone()
+        row = dict(row) if row else None
+    conn.close()
+    return row
+
+
+def get_current_month():
+    from datetime import datetime
+    return datetime.now().strftime("%Y-%m")
+
+
+def update_monthly_target(target_pct):
+    """Owner updates target for current month."""
+    conn = get_conn()
+    month = get_current_month()
+    if hasattr(conn, 'cursor'):
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE month_snapshots SET target_pct = %s WHERE month = %s
+        """, (target_pct, month))
+        conn.commit(); cur.close()
+    else:
+        conn.execute(
+            "UPDATE month_snapshots SET target_pct = ? WHERE month = ?",
+            (target_pct, month)
+        )
+        conn.commit()
+    conn.close()
+
+
 def init_trader_db():
     """Create all trader tables if they don't exist."""
     conn = get_conn()

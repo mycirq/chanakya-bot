@@ -159,6 +159,51 @@ def post_hard_stop(client, loss_usdt):
         logger.error(f"post_hard_stop failed: {e}")
 
 
+def post_month_end_summary(client, snapshot, stats, balance_usdt):
+    cid = _get_channel_id(client)
+    if not cid:
+        return
+    start_balance = float(snapshot.get("start_balance") or 0)
+    target_pct    = float(snapshot.get("target_pct") or 0)
+    month         = snapshot.get("month", "")
+    pnl_usdt      = balance_usdt - start_balance
+    pnl_pct       = (pnl_usdt / start_balance * 100) if start_balance else 0
+    target_usdt   = start_balance * target_pct / 100
+
+    wins   = next((s for s in stats if s["outcome"] == "win"),  {})
+    losses = next((s for s in stats if s["outcome"] == "loss"), {})
+    total  = (wins.get("cnt", 0) or 0) + (losses.get("cnt", 0) or 0)
+    win_rate = (wins.get("cnt", 0) / total * 100) if total else 0
+
+    hit = pnl_usdt >= target_usdt
+    result_emoji = "🏆" if hit else "📉"
+    try:
+        client.chat_postMessage(
+            channel=cid,
+            text=f"{result_emoji} Month-End Review — {month}",
+            blocks=[
+                {"type": "header", "text": {"type": "plain_text",
+                 "text": f"{result_emoji} Month-End Review — {month}"}},
+                {"type": "section", "fields": [
+                    {"type": "mrkdwn", "text": f"*Start Balance:*\n${start_balance:.2f} USDT"},
+                    {"type": "mrkdwn", "text": f"*End Balance:*\n${balance_usdt:.2f} USDT"},
+                    {"type": "mrkdwn", "text": f"*Monthly P&L:*\n{pnl_usdt:+.2f} USDT  ({pnl_pct:+.1f}%)"},
+                    {"type": "mrkdwn", "text": f"*Target:*\n+{target_pct:.0f}%  (${target_usdt:.2f} USDT)"},
+                    {"type": "mrkdwn", "text": f"*Total Trades:*\n{total}"},
+                    {"type": "mrkdwn", "text": f"*Win Rate:*\n{win_rate:.1f}%"},
+                ]},
+                {"type": "section", "text": {"type": "mrkdwn",
+                 "text": ("✅ *Target achieved!* Great month." if hit
+                          else f"❌ *Target missed* by ${target_usdt - pnl_usdt:.2f} USDT.\nUse `/trade-target` to set next month's goal.")}},
+                {"type": "context", "elements": [
+                    {"type": "mrkdwn", "text": "Chanakya Trader • Monthly P&L Review"}
+                ]}
+            ]
+        )
+    except Exception as e:
+        logger.error(f"post_month_end_summary failed: {e}")
+
+
 def post_daily_summary(client, stats, balance_usdt, open_count):
     cid = _get_channel_id(client)
     if not cid:

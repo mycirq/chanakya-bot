@@ -10,6 +10,10 @@ CAPITAL_USDT       = 964.0    # total futures wallet capital
 HARD_STOP_USDT     = 480.0    # freeze all trading (~₹40k)
 WARNING_USDT       = 420.0    # Slack alert, still trading (~₹35k)
 
+# ── Monthly target ─────────────────────────────────────────────────────────────
+# Reviewed at month end — owner updates via /trade-target each month
+MONTHLY_TARGET_PCT = 40.0     # 40% return target this month
+
 # ── Position limits ────────────────────────────────────────────────────────────
 MAX_LEVERAGE       = 5
 MAX_POSITIONS      = 5

@@ -658,12 +658,51 @@ def handle_trade_resume(ack, command, client):
                 "🟢 Trading resumed. Bot will scan for signals on next cycle.")
 
 
+# ── /trade-target command ─────────────────────────────────────────────────────
+
+@app.command("/trade-target")
+def handle_trade_target(ack, command, client):
+    ack()
+    if not _owner_only(command, client): return
+    channel_id = command["channel_id"]
+    user_id    = command["user_id"]
+    raw = (command.get("text") or "").strip().replace("%", "").replace(",", "")
+    if not raw:
+        from trader.memory import get_month_snapshot
+        snap = get_month_snapshot()
+        if snap:
+            _post_reply(client, channel_id, user_id,
+                        f"📅 Current month target: *{snap['target_pct']:.0f}%*\n"
+                        f"Usage: `/trade-target 35` to set next month's goal.")
+        else:
+            _post_reply(client, channel_id, user_id,
+                        "No month snapshot yet. Usage: `/trade-target 35`")
+        return
+    try:
+        target_pct = float(raw)
+    except ValueError:
+        _post_reply(client, channel_id, user_id, "Invalid number. Usage: `/trade-target 35`")
+        return
+    from trader.memory import update_monthly_target
+    update_monthly_target(target_pct)
+    _post_reply(client, channel_id, user_id,
+                f"✅ Monthly target updated to *{target_pct:.0f}%* for this month.")
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     init_db()
-    from trader.memory import init_trader_db
+    from trader.memory import init_trader_db, init_month_snapshot, get_month_snapshot
+    from trader.binance import get_futures_balance
+    from trader.config import MONTHLY_TARGET_PCT
     init_trader_db()
+    # Seed month snapshot on startup if not already set for this month
+    if not get_month_snapshot():
+        try:
+            init_month_snapshot(get_futures_balance(), MONTHLY_TARGET_PCT)
+        except Exception as _e:
+            logging.warning(f"Could not init month snapshot on startup: {_e}")
     start_scheduler(app)
     handler = SocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])
     logging.info("Chanakya Bot is running...")
