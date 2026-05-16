@@ -6,6 +6,7 @@ from apscheduler.triggers.cron import CronTrigger
 from db import get_due_suggestions, update_suggestion, is_news_posted, mark_news_posted
 from prices import get_price
 from news import fetch_news
+from trader.engine import run_scan, run_daily_summary
 
 IST = pytz.timezone("Asia/Kolkata")
 
@@ -183,6 +184,20 @@ def start_scheduler(app):
         id="review_job"
     )
 
+    # Crypto futures scan: every 15 minutes
+    scheduler.add_job(
+        lambda: run_scan(app),
+        "interval", minutes=15,
+        id="crypto_scan"
+    )
+
+    # Daily trading summary: 9 PM IST
+    scheduler.add_job(
+        lambda: run_daily_summary(app),
+        CronTrigger(hour=21, minute=0, timezone=IST),
+        id="daily_summary"
+    )
+
     scheduler.start()
-    logging.info("Scheduler started — news at 8 AM / 1 PM / 6 PM IST, reviews every 6h")
+    logging.info("Scheduler started — news 8AM/1PM/6PM IST, reviews every 6h, crypto scan every 15min")
     return scheduler

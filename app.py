@@ -579,10 +579,155 @@ def handle_portfolio_view(ack, body, client, view):
                 f"Portfolio — {user_label} · {market_label}", blocks=blocks)
 
 
+# ── /trade-set command ────────────────────────────────────────────────────────
+
+@app.command("/trade-set")
+def handle_trade_set(ack, command, client):
+    ack()
+    client.views_open(
+        trigger_id=command["trigger_id"],
+        view={
+            "type": "modal",
+            "callback_id": "trade_set_modal",
+            "private_metadata": command["channel_id"],
+            "title": {"type": "plain_text", "text": "Set Trading Portfolio"},
+            "submit": {"type": "plain_text", "text": "Activate"},
+            "close": {"type": "plain_text", "text": "Cancel"},
+            "blocks": [
+                {
+                    "type": "input", "block_id": "market_block",
+                    "label": {"type": "plain_text", "text": "Market"},
+                    "element": {
+                        "type": "static_select", "action_id": "market",
+                        "options": [
+                            {"text": {"type": "plain_text", "text": "🪙 Crypto Futures (Binance)"}, "value": "crypto"},
+                        ]
+                    }
+                },
+                {
+                    "type": "input", "block_id": "budget_block",
+                    "label": {"type": "plain_text", "text": "Capital (USDT)"},
+                    "element": {"type": "plain_text_input", "action_id": "budget",
+                                "placeholder": {"type": "plain_text", "text": "e.g. 1200"}}
+                },
+                {
+                    "type": "input", "block_id": "target_block",
+                    "label": {"type": "plain_text", "text": "Target Return (%)"},
+                    "element": {"type": "plain_text_input", "action_id": "target",
+                                "placeholder": {"type": "plain_text", "text": "e.g. 15"}}
+                },
+                {
+                    "type": "input", "block_id": "hardstop_block",
+                    "label": {"type": "plain_text", "text": "Hard Stop Loss (USDT)"},
+                    "element": {"type": "plain_text_input", "action_id": "hardstop",
+                                "initial_value": "480",
+                                "placeholder": {"type": "plain_text", "text": "e.g. 480"}}
+                },
+            ]
+        }
+    )
+
+
+@app.view("trade_set_modal")
+def handle_trade_set_submit(ack, body, client, view):
+    ack()
+    from trader.engine import resume_trading
+    values = view["state"]["values"]
+    channel_id = view["private_metadata"]
+    user_id    = body["user"]["id"]
+
+    market   = values["market_block"]["market"]["selected_option"]["value"]
+    budget   = float(values["budget_block"]["budget"]["value"])
+    target   = float(values["target_block"]["target"]["value"])
+    hardstop = float(values["hardstop_block"]["hardstop"]["value"])
+
+    # Save to DB
+    conn = __import__("db").get_conn()
+    if hasattr(conn, 'cursor'):
+        cur = conn.cursor()
+        cur.execute("INSERT INTO trade_config (market, budget_usdt, target_pct, hard_stop_usdt) VALUES (%s,%s,%s,%s)",
+                    (market, budget, target, hardstop))
+        conn.commit(); cur.close()
+    else:
+        conn.execute("INSERT INTO trade_config (market, budget_usdt, target_pct, hard_stop_usdt) VALUES (?,?,?,?)",
+                     (market, budget, target, hardstop))
+        conn.commit()
+    conn.close()
+
+    resume_trading()
+    _post_reply(client, channel_id, user_id,
+                f"⚡ Trading activated — *{market}* | Capital: ${budget} | Target: +{target}% | Hard stop: ${hardstop}")
+
+
+# ── /trade-active command ──────────────────────────────────────────────────────
+
+@app.command("/trade-active")
+def handle_trade_active(ack, command, client):
+    ack()
+    from trader.binance import get_open_positions, get_futures_balance
+    from trader.engine import is_paused, get_total_loss_usdt
+
+    channel_id = command["channel_id"]
+    user_id    = command["user_id"]
+
+    positions = get_open_positions()
+    balance   = get_futures_balance()
+    total_loss = get_total_loss_usdt()
+    status    = "🔴 PAUSED" if is_paused() else "🟢 ACTIVE"
+
+    if not positions:
+        _post_reply(client, channel_id, user_id,
+                    f"{status} | Balance: ${balance:.2f} USDT | Loss: ${total_loss:.2f} USDT\nNo open positions right now.")
+        return
+
+    blocks = [
+        {"type": "header", "text": {"type": "plain_text", "text": f"⚡ Active Positions {status}"}},
+        {"type": "section", "fields": [
+            {"type": "mrkdwn", "text": f"*Wallet:*\n${balance:.2f} USDT"},
+            {"type": "mrkdwn", "text": f"*Total Loss:*\n${total_loss:.2f} USDT"},
+        ]},
+        {"type": "divider"},
+    ]
+    for p in positions:
+        pnl = p["unrealized_pnl"]
+        trend = "🟢" if pnl >= 0 else "🔴"
+        blocks.append({"type": "section", "fields": [
+            {"type": "mrkdwn", "text": f"*{trend} {p['symbol']}*\n{p['side'].upper()} {int(p['leverage'])}x"},
+            {"type": "mrkdwn", "text": f"*Entry:* ${p['entry_price']:,.4f}\n*Mark:* ${p['mark_price']:,.4f}"},
+            {"type": "mrkdwn", "text": f"*Unrealized P&L:*\n{pnl:+.2f} USDT"},
+            {"type": "mrkdwn", "text": f"*Liq. Price:*\n${p['liq_price']:,.4f}"},
+        ]})
+        blocks.append({"type": "divider"})
+
+    _post_reply(client, channel_id, user_id, "Active positions", blocks=blocks)
+
+
+# ── /trade-pause & /trade-resume ──────────────────────────────────────────────
+
+@app.command("/trade-pause")
+def handle_trade_pause(ack, command, client):
+    ack()
+    from trader.engine import pause_trading
+    pause_trading()
+    _post_reply(client, command["channel_id"], command["user_id"],
+                "🔴 Trading paused. Open positions are still being monitored. Use `/trade-resume` to restart.")
+
+
+@app.command("/trade-resume")
+def handle_trade_resume(ack, command, client):
+    ack()
+    from trader.engine import resume_trading
+    resume_trading()
+    _post_reply(client, command["channel_id"], command["user_id"],
+                "🟢 Trading resumed. Bot will scan for signals on next cycle.")
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     init_db()
+    from trader.memory import init_trader_db
+    init_trader_db()
     start_scheduler(app)
     handler = SocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])
     logging.info("Chanakya Bot is running...")

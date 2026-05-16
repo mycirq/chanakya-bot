@@ -6,3 +6,6 @@ APScheduler>=3.10.4
 psycopg2-binary>=2.9.9
 feedparser>=6.0.11
 pytz>=2024.1
+ccxt>=4.3.0
+pandas>=2.0.0
+pandas-ta>=0.3.14b
