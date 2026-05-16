@@ -2,12 +2,13 @@ import pytz
 
 IST = pytz.timezone("Asia/Kolkata")
 
+# ── Owner ─────────────────────────────────────────────────────────────────────
+OWNER_SLACK_ID     = "U0B2PS4SSQ6"
+
 # ── Portfolio limits ───────────────────────────────────────────────────────────
-HARD_STOP_INR      = 40_000   # freeze all trading
-WARNING_INR        = 35_000   # Slack alert, still trading
-INR_TO_USDT        = 0.012    # ~83 INR per USD; update periodically
-HARD_STOP_USDT     = HARD_STOP_INR * INR_TO_USDT
-WARNING_USDT       = WARNING_INR  * INR_TO_USDT
+CAPITAL_USDT       = 964.0    # total futures wallet capital
+HARD_STOP_USDT     = 480.0    # freeze all trading (~₹40k)
+WARNING_USDT       = 420.0    # Slack alert, still trading (~₹35k)
 
 # ── Position limits ────────────────────────────────────────────────────────────
 MAX_LEVERAGE       = 5

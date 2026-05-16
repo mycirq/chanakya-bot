@@ -15,7 +15,7 @@ from trader.memory import (
     get_open_positions_db, get_recent_memory, get_trade_stats
 )
 from trader.reporter import (
-    post_trade_opened, post_trade_closed,
+    post_pre_trade_thesis, post_trade_opened, post_trade_closed,
     post_drawdown_warning, post_hard_stop, post_daily_summary
 )
 from trader.config import MIN_SIGNAL_SCORE, MAX_LEVERAGE, TOP_PAIRS_COUNT
@@ -153,6 +153,12 @@ def run_scan(app):
     if margin < 5:
         logger.info(f"Margin too small: ${margin:.2f}, skipping")
         return
+
+    # Post thesis BEFORE executing
+    post_pre_trade_thesis(
+        app.client, symbol, direction, entry_price,
+        tp_price, sl_price, margin, MAX_LEVERAGE, score, reason, rr
+    )
 
     # Place order
     order = place_order(symbol, direction, margin, entry_price,

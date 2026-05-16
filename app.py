@@ -579,84 +579,17 @@ def handle_portfolio_view(ack, body, client, view):
                 f"Portfolio — {user_label} · {market_label}", blocks=blocks)
 
 
-# ── /trade-set command ────────────────────────────────────────────────────────
-
-@app.command("/trade-set")
-def handle_trade_set(ack, command, client):
-    ack()
-    client.views_open(
-        trigger_id=command["trigger_id"],
-        view={
-            "type": "modal",
-            "callback_id": "trade_set_modal",
-            "private_metadata": command["channel_id"],
-            "title": {"type": "plain_text", "text": "Set Trading Portfolio"},
-            "submit": {"type": "plain_text", "text": "Activate"},
-            "close": {"type": "plain_text", "text": "Cancel"},
-            "blocks": [
-                {
-                    "type": "input", "block_id": "market_block",
-                    "label": {"type": "plain_text", "text": "Market"},
-                    "element": {
-                        "type": "static_select", "action_id": "market",
-                        "options": [
-                            {"text": {"type": "plain_text", "text": "🪙 Crypto Futures (Binance)"}, "value": "crypto"},
-                        ]
-                    }
-                },
-                {
-                    "type": "input", "block_id": "budget_block",
-                    "label": {"type": "plain_text", "text": "Capital (USDT)"},
-                    "element": {"type": "plain_text_input", "action_id": "budget",
-                                "placeholder": {"type": "plain_text", "text": "e.g. 1200"}}
-                },
-                {
-                    "type": "input", "block_id": "target_block",
-                    "label": {"type": "plain_text", "text": "Target Return (%)"},
-                    "element": {"type": "plain_text_input", "action_id": "target",
-                                "placeholder": {"type": "plain_text", "text": "e.g. 15"}}
-                },
-                {
-                    "type": "input", "block_id": "hardstop_block",
-                    "label": {"type": "plain_text", "text": "Hard Stop Loss (USDT)"},
-                    "element": {"type": "plain_text_input", "action_id": "hardstop",
-                                "initial_value": "480",
-                                "placeholder": {"type": "plain_text", "text": "e.g. 480"}}
-                },
-            ]
-        }
-    )
-
-
-@app.view("trade_set_modal")
-def handle_trade_set_submit(ack, body, client, view):
-    ack()
-    from trader.engine import resume_trading
-    values = view["state"]["values"]
-    channel_id = view["private_metadata"]
-    user_id    = body["user"]["id"]
-
-    market   = values["market_block"]["market"]["selected_option"]["value"]
-    budget   = float(values["budget_block"]["budget"]["value"].replace(",", ""))
-    target   = float(values["target_block"]["target"]["value"].replace("%", "").strip())
-    hardstop = float(values["hardstop_block"]["hardstop"]["value"].replace(",", ""))
-
-    # Save to DB
-    conn = __import__("db").get_conn()
-    if hasattr(conn, 'cursor'):
-        cur = conn.cursor()
-        cur.execute("INSERT INTO trade_config (market, budget_usdt, target_pct, hard_stop_usdt) VALUES (%s,%s,%s,%s)",
-                    (market, budget, target, hardstop))
-        conn.commit(); cur.close()
-    else:
-        conn.execute("INSERT INTO trade_config (market, budget_usdt, target_pct, hard_stop_usdt) VALUES (?,?,?,?)",
-                     (market, budget, target, hardstop))
-        conn.commit()
-    conn.close()
-
-    resume_trading()
-    _post_reply(client, channel_id, user_id,
-                f"⚡ Trading activated — *{market}* | Capital: ${budget} | Target: +{target}% | Hard stop: ${hardstop}")
+def _owner_only(command, client):
+    """Returns True if caller is owner, posts error and returns False otherwise."""
+    from trader.config import OWNER_SLACK_ID
+    if command["user_id"] != OWNER_SLACK_ID:
+        client.chat_postEphemeral(
+            channel=command["channel_id"],
+            user=command["user_id"],
+            text="🚫 This command is restricted to the workspace owner."
+        )
+        return False
+    return True
 
 
 # ── /trade-active command ──────────────────────────────────────────────────────
@@ -664,6 +597,7 @@ def handle_trade_set_submit(ack, body, client, view):
 @app.command("/trade-active")
 def handle_trade_active(ack, command, client):
     ack()
+    if not _owner_only(command, client): return
     from trader.binance import get_open_positions, get_futures_balance
     from trader.engine import is_paused, get_total_loss_usdt
 
@@ -707,6 +641,7 @@ def handle_trade_active(ack, command, client):
 @app.command("/trade-pause")
 def handle_trade_pause(ack, command, client):
     ack()
+    if not _owner_only(command, client): return
     from trader.engine import pause_trading
     pause_trading()
     _post_reply(client, command["channel_id"], command["user_id"],
@@ -716,6 +651,7 @@ def handle_trade_pause(ack, command, client):
 @app.command("/trade-resume")
 def handle_trade_resume(ack, command, client):
     ack()
+    if not _owner_only(command, client): return
     from trader.engine import resume_trading
     resume_trading()
     _post_reply(client, command["channel_id"], command["user_id"],

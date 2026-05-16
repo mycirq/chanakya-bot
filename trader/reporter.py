@@ -14,6 +14,43 @@ def _get_channel_id(client):
     return None
 
 
+def post_pre_trade_thesis(client, symbol, direction, entry, tp, sl,
+                          margin, leverage, score, reason, rr):
+    """Posted BEFORE executing — thesis + proof, no approval needed."""
+    cid = _get_channel_id(client)
+    if not cid:
+        return
+    arrow   = "🟢 LONG" if direction == "long" else "🔴 SHORT"
+    tp_pct  = abs(tp - entry) / entry * 100 * leverage
+    sl_pct  = abs(sl - entry) / entry * 100 * leverage
+    try:
+        client.chat_postMessage(
+            channel=cid,
+            text=f"🧠 Trade thesis: {arrow} {symbol}",
+            blocks=[
+                {"type": "header", "text": {"type": "plain_text",
+                 "text": f"🧠 Executing: {arrow} {symbol}"}},
+                {"type": "section", "text": {"type": "mrkdwn",
+                 "text": f"*Thesis:*\n{reason}"}},
+                {"type": "section", "fields": [
+                    {"type": "mrkdwn", "text": f"*Entry:*\n${entry:,.4f}"},
+                    {"type": "mrkdwn", "text": f"*Direction:*\n{direction.upper()} {leverage}x isolated"},
+                    {"type": "mrkdwn", "text": f"*Take Profit:*\n${tp:,.4f}  (+{tp_pct:.1f}% on margin)"},
+                    {"type": "mrkdwn", "text": f"*Stop Loss:*\n${sl:,.4f}  (-{sl_pct:.1f}% on margin)"},
+                    {"type": "mrkdwn", "text": f"*Margin:*\n${margin:.2f} USDT"},
+                    {"type": "mrkdwn", "text": f"*Risk:Reward:*\n1:{rr:.1f}"},
+                ]},
+                {"type": "section", "text": {"type": "mrkdwn",
+                 "text": f"*Signal confidence:* {score}/100 — executing now ⚡"}},
+                {"type": "context", "elements": [
+                    {"type": "mrkdwn", "text": "Chanakya Trader • No approval needed • Order firing now"}
+                ]}
+            ]
+        )
+    except Exception as e:
+        logger.error(f"post_pre_trade_thesis failed: {e}")
+
+
 def post_trade_opened(client, symbol, direction, entry, tp, sl, liq,
                       margin, leverage, score, reason, pnl_pct_tp):
     cid = _get_channel_id(client)
