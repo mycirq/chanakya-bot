@@ -20,7 +20,7 @@ def get_exchange():
 def get_futures_balance():
     """Returns free USDT in futures wallet."""
     try:
-        balance = get_exchange().fetch_balance()
+        balance = get_exchange().fetch_balance({"type": "future"})
         return float(balance["USDT"]["free"])
     except Exception as e:
         logger.error(f"Balance fetch failed: {e}")
