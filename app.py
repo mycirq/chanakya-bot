@@ -610,6 +610,54 @@ def handle_kite_auth(ack, command, client):
         _post_reply(client, channel_id, user_id, f"❌ Kite auth failed: {e}")
 
 
+# ── /trade-test command ────────────────────────────────────────────────────────
+
+@app.command("/trade-test")
+def handle_trade_test(ack, command, client):
+    """Place a $10 BTC long limit order at 1x leverage to verify connectivity."""
+    ack()
+    if not _owner_only(command, client): return
+    channel_id = command["channel_id"]
+    user_id    = command["user_id"]
+    try:
+        from trader.binance import get_exchange, get_futures_balance
+        ex = get_exchange()
+
+        symbol   = "BTC/USDT:USDT"
+        leverage = 1
+        margin   = 10.0  # $10
+
+        # Fetch current BTC price
+        ticker     = ex.fetch_ticker(symbol)
+        price      = float(ticker["last"])
+        # Limit slightly below market so it sits as open order (real limit test)
+        limit_price = ex.price_to_precision(symbol, price * 0.995)
+        amount      = ex.amount_to_precision(symbol, margin / price)
+
+        # Set 1x isolated
+        try: ex.set_margin_mode("isolated", symbol)
+        except Exception: pass
+        try: ex.set_leverage(leverage, symbol)
+        except Exception: pass
+
+        order = ex.create_order(symbol, "limit", "buy", amount, limit_price, {
+            "timeInForce":  "GTC",
+            "positionSide": "BOTH",
+        })
+
+        balance = get_futures_balance()
+        _post_reply(client, channel_id, user_id,
+            f"✅ *Test order placed!*\n"
+            f"• Symbol: `{symbol}` | Side: LONG | 1x\n"
+            f"• Amount: `{amount} BTC` | Limit: `${float(limit_price):,.2f}`\n"
+            f"• Order ID: `{order['id']}`\n"
+            f"• Wallet balance: `${balance:.2f} USDT`\n"
+            f"_Binance connection is working. Cancel this order manually on Binance._"
+        )
+    except Exception as e:
+        _post_reply(client, channel_id, user_id, f"❌ Test order failed: {e}")
+
+
 # ── /trade-active command ──────────────────────────────────────────────────────
 
 @app.command("/trade-active")
