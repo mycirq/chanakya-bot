@@ -610,6 +610,24 @@ def handle_kite_auth(ack, command, client):
         _post_reply(client, channel_id, user_id, f"❌ Kite auth failed: {e}")
 
 
+# ── /server-ip command ─────────────────────────────────────────────────────────
+
+@app.command("/server-ip")
+def handle_server_ip(ack, command, client):
+    """Returns the server's outbound IP — needed for Binance API whitelist."""
+    ack()
+    if not _owner_only(command, client): return
+    channel_id = command["channel_id"]
+    user_id    = command["user_id"]
+    try:
+        import requests as req
+        ip = req.get("https://api4.ipify.org", timeout=5).text.strip()
+        _post_reply(client, channel_id, user_id,
+            f"🌐 Server outbound IP: `{ip}`\nAdd this to Binance API whitelist.")
+    except Exception as e:
+        _post_reply(client, channel_id, user_id, f"❌ Could not fetch IP: {e}")
+
+
 # ── /trade-test command ────────────────────────────────────────────────────────
 
 @app.command("/trade-test")
