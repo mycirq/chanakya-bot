@@ -157,34 +157,44 @@ def login_with_totp(totp_value: str) -> str:
     if twofa_data.get("status") != "success":
         raise Exception(f"Kite TOTP failed: {twofa_data.get('message', twofa_data)}")
 
-    # Step 3: Session is now authenticated — hit connect/login to get request_token
-    # After successful login+2FA, Kite redirects to redirect_url?request_token=xxx
-    connect_resp = sess.get(
-        f"https://kite.zerodha.com/connect/login?v=3&api_key={api_key}",
-        allow_redirects=False
-    )
-    location = connect_resp.headers.get("Location", "")
-    logger.info(f"Connect/login location: {location[:80] if location else 'none'}")
+    # Step 3: Follow connect/login redirect chain to extract request_token
+    # Zerodha redirects through several hops before hitting the redirect_url
+    base_url = "https://kite.zerodha.com"
+    url = f"{base_url}/connect/login?v=3&api_key={api_key}"
+    request_token = None
 
-    # Follow redirect chain until we hit redirect_url (127.0.0.1)
-    hops = 0
-    while location and "127.0.0.1" not in location and hops < 6:
-        r = sess.get(location, allow_redirects=False)
+    for hop in range(10):
+        r = sess.get(url, allow_redirects=False)
+        status = r.status_code
         location = r.headers.get("Location", "")
-        logger.info(f"Redirect hop {hops+1}: {location[:80] if location else 'none'}")
-        hops += 1
 
-    if not location or "request_token" not in location:
-        raise Exception(
-            f"Could not get request_token after {hops} hops. Last location: {location!r}"
-        )
+        # Resolve relative redirects
+        if location and location.startswith("/"):
+            location = base_url + location
 
-    parsed = urllib.parse.urlparse(location)
-    params = urllib.parse.parse_qs(parsed.query)
-    request_token = params.get("request_token", [None])[0]
+        logger.info(f"Hop {hop}: status={status} url={url[:80]} → location={location[:80] if location else 'none'}")
+
+        # Check if request_token is in the redirect target
+        if location and "request_token" in location:
+            parsed = urllib.parse.urlparse(location)
+            request_token = urllib.parse.parse_qs(parsed.query).get("request_token", [None])[0]
+            break
+
+        # Check if request_token landed in the current URL (shouldn't happen but guard)
+        if "request_token" in url:
+            parsed = urllib.parse.urlparse(url)
+            request_token = urllib.parse.parse_qs(parsed.query).get("request_token", [None])[0]
+            break
+
+        if not location:
+            # No redirect — might be a consent page or error; log body for diagnosis
+            logger.error(f"Redirect chain stopped at hop {hop} with no Location. Body: {r.text[:300]}")
+            break
+
+        url = location
 
     if not request_token:
-        raise Exception(f"request_token missing in: {location}")
+        raise Exception(f"Could not get request_token after following redirects. Check logs for details.")
 
     logger.info(f"Got request_token: {request_token[:10]}...")
 
