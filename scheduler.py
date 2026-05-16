@@ -223,12 +223,11 @@ def start_scheduler(app):
     )
 
     # Kite auto-login: 8:55 AM IST, Mon–Fri (before market open at 9:15)
-    # NOTE: Disabled until user activates external TOTP on Zerodha account
-    # scheduler.add_job(
-    #     lambda: _run_kite_auto_login(app.client),
-    #     CronTrigger(hour=8, minute=55, day_of_week="mon-fri", timezone=IST),
-    #     id="kite_auto_login"
-    # )
+    scheduler.add_job(
+        lambda: _run_kite_auto_login(app.client),
+        CronTrigger(hour=8, minute=55, day_of_week="mon-fri", timezone=IST),
+        id="kite_auto_login"
+    )
 
     # Kite month start: 1st of month at 6 AM IST
     scheduler.add_job(
