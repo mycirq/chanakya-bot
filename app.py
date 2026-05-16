@@ -641,16 +641,20 @@ def handle_trade_test(ack, command, client):
         from trader.binance import get_exchange, get_futures_balance
         ex = get_exchange()
 
-        symbol   = "BTC/USDT:USDT"
+        symbol   = "ETH/USDT:USDT"
         leverage = 1
         margin   = 10.0  # $10
 
-        # Fetch current BTC price
-        ticker     = ex.fetch_ticker(symbol)
-        price      = float(ticker["last"])
+        # Fetch current ETH price
+        ticker      = ex.fetch_ticker(symbol)
+        price       = float(ticker["last"])
         # Limit slightly below market so it sits as open order (real limit test)
         limit_price = ex.price_to_precision(symbol, price * 0.995)
-        amount      = ex.amount_to_precision(symbol, margin / price)
+        # Respect Binance minimum: 0.001 ETH
+        raw_amount  = margin / price
+        market      = ex.market(symbol)
+        min_amount  = float(market.get("limits", {}).get("amount", {}).get("min") or 0.001)
+        amount      = ex.amount_to_precision(symbol, max(raw_amount, min_amount))
 
         # Set 1x isolated
         try: ex.set_margin_mode("isolated", symbol)
