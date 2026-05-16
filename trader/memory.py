@@ -89,6 +89,82 @@ def update_monthly_target(target_pct):
     conn.close()
 
 
+def init_kite_month_snapshot(balance_inr, target_pct):
+    conn = get_conn()
+    month = get_current_month()
+    if hasattr(conn, "cursor"):
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO kite_month_snapshots (month, start_balance, target_pct)
+            VALUES (%s, %s, %s) ON CONFLICT DO NOTHING
+        """, (month, balance_inr, target_pct))
+        conn.commit(); cur.close()
+    else:
+        conn.execute("""
+            INSERT OR IGNORE INTO kite_month_snapshots (month, start_balance, target_pct)
+            VALUES (?, ?, ?)
+        """, (month, balance_inr, target_pct))
+        conn.commit()
+    conn.close()
+
+
+def get_kite_month_snapshot():
+    conn = get_conn()
+    month = get_current_month()
+    if hasattr(conn, "cursor"):
+        from psycopg2.extras import RealDictCursor
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM kite_month_snapshots WHERE month = %s", (month,))
+        row = cur.fetchone(); cur.close()
+    else:
+        row = conn.execute(
+            "SELECT * FROM kite_month_snapshots WHERE month = ?", (month,)
+        ).fetchone()
+        row = dict(row) if row else None
+    conn.close()
+    return row
+
+
+def update_kite_monthly_target(target_pct):
+    conn = get_conn()
+    month = get_current_month()
+    if hasattr(conn, "cursor"):
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE kite_month_snapshots SET target_pct = %s WHERE month = %s",
+            (target_pct, month)
+        )
+        conn.commit(); cur.close()
+    else:
+        conn.execute(
+            "UPDATE kite_month_snapshots SET target_pct = ? WHERE month = ?",
+            (target_pct, month)
+        )
+        conn.commit()
+    conn.close()
+
+
+def get_kite_trade_stats():
+    conn = get_conn()
+    if hasattr(conn, "cursor"):
+        from psycopg2.extras import RealDictCursor
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT outcome, COUNT(*) as cnt, AVG(pnl_inr) as avg_pnl,
+                   SUM(pnl_inr) as total_pnl
+            FROM kite_memory GROUP BY outcome
+        """)
+        rows = [dict(r) for r in cur.fetchall()]; cur.close()
+    else:
+        rows = [dict(r) for r in conn.execute("""
+            SELECT outcome, COUNT(*) as cnt, AVG(pnl_inr) as avg_pnl,
+                   SUM(pnl_inr) as total_pnl
+            FROM kite_memory GROUP BY outcome
+        """).fetchall()]
+    conn.close()
+    return rows
+
+
 def init_trader_db():
     """Create all trader tables if they don't exist."""
     conn = get_conn()
@@ -156,6 +232,63 @@ def init_trader_db():
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """)
+        # Kite FnO tables
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS kite_config (
+                key VARCHAR(50) PRIMARY KEY,
+                value TEXT,
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS kite_positions (
+                id SERIAL PRIMARY KEY,
+                underlying VARCHAR(20) NOT NULL,
+                direction VARCHAR(10) NOT NULL,
+                tradingsymbol VARCHAR(50) NOT NULL,
+                option_type VARCHAR(2),
+                entry_premium DECIMAL(10,2),
+                tp_premium DECIMAL(10,2),
+                sl_premium DECIMAL(10,2),
+                quantity INTEGER,
+                lot_size INTEGER,
+                signal_score INTEGER,
+                signal_reason TEXT,
+                status VARCHAR(20) DEFAULT 'open',
+                opened_at TIMESTAMP DEFAULT NOW(),
+                closed_at TIMESTAMP,
+                close_premium DECIMAL(10,2),
+                pnl_inr DECIMAL(12,2),
+                close_reason VARCHAR(50)
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS kite_memory (
+                id SERIAL PRIMARY KEY,
+                underlying VARCHAR(20),
+                direction VARCHAR(10),
+                tradingsymbol VARCHAR(50),
+                entry_premium DECIMAL(10,2),
+                close_premium DECIMAL(10,2),
+                pnl_inr DECIMAL(12,2),
+                pnl_pct DECIMAL(10,4),
+                quantity INTEGER,
+                signal_score INTEGER,
+                signal_reason TEXT,
+                duration_minutes INTEGER,
+                outcome VARCHAR(20),
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS kite_month_snapshots (
+                id SERIAL PRIMARY KEY,
+                month VARCHAR(7) NOT NULL UNIQUE,
+                start_balance DECIMAL(12,2),
+                target_pct DECIMAL(10,2),
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
         conn.commit()
         cur.close()
     else:
@@ -214,6 +347,62 @@ def init_trader_db():
         """)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS month_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                month TEXT NOT NULL UNIQUE,
+                start_balance REAL,
+                target_pct REAL,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS kite_config (
+                key TEXT PRIMARY KEY,
+                value TEXT,
+                updated_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS kite_positions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                underlying TEXT NOT NULL,
+                direction TEXT NOT NULL,
+                tradingsymbol TEXT NOT NULL,
+                option_type TEXT,
+                entry_premium REAL,
+                tp_premium REAL,
+                sl_premium REAL,
+                quantity INTEGER,
+                lot_size INTEGER,
+                signal_score INTEGER,
+                signal_reason TEXT,
+                status TEXT DEFAULT 'open',
+                opened_at TEXT DEFAULT (datetime('now')),
+                closed_at TEXT,
+                close_premium REAL,
+                pnl_inr REAL,
+                close_reason TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS kite_memory (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                underlying TEXT,
+                direction TEXT,
+                tradingsymbol TEXT,
+                entry_premium REAL,
+                close_premium REAL,
+                pnl_inr REAL,
+                pnl_pct REAL,
+                quantity INTEGER,
+                signal_score INTEGER,
+                signal_reason TEXT,
+                duration_minutes INTEGER,
+                outcome TEXT,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS kite_month_snapshots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 month TEXT NOT NULL UNIQUE,
                 start_balance REAL,

@@ -40,8 +40,41 @@ ZONES = {
     # dead: 23:30 – 05:30 IST → no new trades
 }
 
+# ── Kite FnO ───────────────────────────────────────────────────────────────────
+KITE_CAPITAL_INR        = 100000.0   # ₹1,00,000 total capital
+KITE_HARD_STOP_INR      = 40000.0    # freeze all trading
+KITE_WARNING_INR        = 30000.0    # Slack alert, still trading
+KITE_MONTHLY_TARGET_PCT = 40.0       # 40% monthly target
+KITE_MAX_POSITIONS      = 3          # max open FnO positions
+KITE_MAX_POSITION_PCT   = 0.20       # max 20% capital per trade
+KITE_PREMIUM_TP_PCT     = 0.50       # 50% gain on premium → TP
+KITE_PREMIUM_SL_PCT     = 0.30       # 30% loss on premium → SL
+KITE_MIN_SIGNAL_SCORE   = 65         # same threshold as crypto
+KITE_SCAN_INTERVAL_MIN  = 5          # scan every 5 min during market hours
+
+# Market hours IST
+KITE_MARKET_OPEN  = (9, 15)          # 9:15 AM
+KITE_MARKET_CLOSE = (15, 25)         # 15:25 (stop new trades 5 min before close)
+
+# Index config — lot sizes from instrument file at runtime, these are fallbacks
+KITE_INDICES = {
+    "NIFTY": {
+        "token":      256265,          # NSE:NIFTY 50 instrument token
+        "quote":      "NSE:NIFTY 50",
+        "strike_gap": 50,
+        "lot_size":   75,              # fallback — always read from instruments
+    },
+    "BANKNIFTY": {
+        "token":      260105,          # NSE:NIFTY BANK instrument token
+        "quote":      "NSE:NIFTY BANK",
+        "strike_gap": 100,
+        "lot_size":   35,              # fallback
+    },
+}
+
 # ── Slack channels ─────────────────────────────────────────────────────────────
 CRYPTO_TRADES_CHANNEL = "crypto-trades"
+KITE_TRADES_CHANNEL   = "dalal-trades"
 
 # ── Indicator params ───────────────────────────────────────────────────────────
 RSI_PERIOD         = 14

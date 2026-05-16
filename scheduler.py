@@ -7,10 +7,16 @@ from db import get_due_suggestions, update_suggestion, is_news_posted, mark_news
 from prices import get_price
 from news import fetch_news
 from trader.engine import run_scan, run_daily_summary
-from trader.memory import init_month_snapshot, get_month_snapshot, get_trade_stats
+from trader.kite_engine import run_kite_scan, run_kite_daily_summary
+from trader.memory import (
+    init_month_snapshot, get_month_snapshot, get_trade_stats,
+    init_kite_month_snapshot, get_kite_month_snapshot, get_kite_trade_stats
+)
 from trader.binance import get_futures_balance
+from trader.kite_engine import get_kite_capital
 from trader.reporter import post_month_end_summary
-from trader.config import MONTHLY_TARGET_PCT
+from trader.kite_reporter import post_kite_month_end_summary, post_totp_reminder
+from trader.config import MONTHLY_TARGET_PCT, KITE_MONTHLY_TARGET_PCT
 
 IST = pytz.timezone("Asia/Kolkata")
 
@@ -202,6 +208,41 @@ def start_scheduler(app):
         id="daily_summary"
     )
 
+    # Kite FnO scan: every 5 min (runs only when market is open)
+    scheduler.add_job(
+        lambda: run_kite_scan(app),
+        "interval", minutes=5,
+        id="kite_scan"
+    )
+
+    # Kite daily summary: 4 PM IST (after market close)
+    scheduler.add_job(
+        lambda: run_kite_daily_summary(app),
+        CronTrigger(hour=16, minute=0, timezone=IST),
+        id="kite_daily_summary"
+    )
+
+    # TOTP reminder: 8:50 AM IST, Mon–Fri
+    scheduler.add_job(
+        lambda: post_totp_reminder(app.client),
+        CronTrigger(hour=8, minute=50, day_of_week="mon-fri", timezone=IST),
+        id="kite_totp_reminder"
+    )
+
+    # Kite month start: 1st of month at 6 AM IST
+    scheduler.add_job(
+        lambda: init_kite_month_snapshot(get_kite_capital(), KITE_MONTHLY_TARGET_PCT),
+        CronTrigger(day=1, hour=6, minute=0, timezone=IST),
+        id="kite_month_start"
+    )
+
+    # Kite month end: daily 9 PM IST, only posts on last day
+    scheduler.add_job(
+        lambda: _run_kite_month_end_summary(app),
+        CronTrigger(hour=21, minute=0, timezone=IST),
+        id="kite_month_end"
+    )
+
     # Month start (1st of each month, 6 AM IST): snapshot starting balance
     scheduler.add_job(
         lambda: init_month_snapshot(get_futures_balance(), MONTHLY_TARGET_PCT),
@@ -219,6 +260,20 @@ def start_scheduler(app):
     scheduler.start()
     logging.info("Scheduler started — news 8AM/1PM/6PM IST, reviews every 6h, crypto scan every 15min, month-end review")
     return scheduler
+
+
+def _run_kite_month_end_summary(app):
+    import calendar
+    from datetime import datetime
+    now = datetime.now(IST)
+    if now.day != calendar.monthrange(now.year, now.month)[1]:
+        return
+    snapshot = get_kite_month_snapshot()
+    if not snapshot:
+        return
+    stats   = get_kite_trade_stats()
+    capital = get_kite_capital()
+    post_kite_month_end_summary(app.client, snapshot, stats, capital)
 
 
 def _run_month_end_summary(app):
