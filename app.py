@@ -607,7 +607,49 @@ def handle_kite_auth(ack, command, client):
         _post_reply(client, channel_id, user_id,
                     "✅ Kite authorized. FnO trading active until 6 AM tomorrow.")
     except Exception as e:
-        _post_reply(client, channel_id, user_id, f"❌ Kite auth failed: {e}")
+        msg = str(e)
+        if msg.startswith("NEEDS_CONSENT:"):
+            authorize_url = msg.split("NEEDS_CONSENT:", 1)[1]
+            _post_reply(client, channel_id, user_id,
+                f"🔐 *One-time Kite authorization needed:*\n"
+                f"1. Open this URL in your browser:\n{authorize_url}\n"
+                f"2. Click *Allow* on the page\n"
+                f"3. Browser will show a failed page — copy the `request_token` from the URL bar\n"
+                f"   _(URL looks like: `127.0.0.1/?request_token=XXXXXX&...`)_\n"
+                f"4. Run `/kite-token XXXXXX` with just the token value\n\n"
+                f"_After this one-time step, `/kite-auth` will be fully automatic forever._"
+            )
+        else:
+            _post_reply(client, channel_id, user_id, f"❌ Kite auth failed: {e}")
+
+
+@app.command("/kite-token")
+def handle_kite_token(ack, command, client):
+    """Complete Kite auth using request_token from browser after manual consent."""
+    ack()
+    if not _owner_only(command, client): return
+    channel_id = command["channel_id"]
+    user_id    = command["user_id"]
+    token = (command.get("text") or "").strip()
+    if not token:
+        _post_reply(client, channel_id, user_id,
+                    "Usage: `/kite-token <request_token>` — paste token from browser URL bar")
+        return
+    try:
+        import os
+        from kiteconnect import KiteConnect
+        from trader.kite import _store_token, _kite
+        api_key    = os.environ["KITE_API_KEY"]
+        api_secret = os.environ["KITE_API_SECRET"]
+        kite = KiteConnect(api_key=api_key)
+        session_data = kite.generate_session(token, api_secret=api_secret)
+        access_token = session_data["access_token"]
+        _store_token(access_token)
+        kite.set_access_token(access_token)
+        _post_reply(client, channel_id, user_id,
+                    "✅ Kite authorized via token. FnO trading active — future `/kite-auth` calls are now fully automatic.")
+    except Exception as e:
+        _post_reply(client, channel_id, user_id, f"❌ Token exchange failed: {e}")
 
 
 # ── /server-ip command ─────────────────────────────────────────────────────────

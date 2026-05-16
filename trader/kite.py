@@ -187,52 +187,10 @@ def login_with_totp(totp_value: str) -> str:
             break
 
         if not location:
-            # Check if this is the authorize/consent page — auto-submit it
             if "connect/authorize" in url:
-                logger.info("Hit authorize/consent page — trying to auto-authorize")
-                parsed_url = urllib.parse.urlparse(url)
-                url_params = urllib.parse.parse_qs(parsed_url.query)
-                sess_id    = url_params.get("sess_id", [None])[0]
-
-                body = r.text
-                logger.info(f"Authorize page body snippet: {body[200:600]}")
-
-                # Try common patterns to find the form action endpoint
-                import re
-                # Look for action="..." in form tags
-                form_action = re.search(r'action=["\']([^"\']+)["\']', body)
-                # Look for fetch/axios calls to an API endpoint in JS
-                api_endpoint = re.search(r'["\'](/connect/[^"\'?]+)["\']', body)
-
-                # Try methods in order: GET with action=allow, PUT, then parse form
-                endpoints_to_try = [
-                    ("GET", f"{url}&action=allow"),
-                    ("GET", f"{url}&skip=0&allow=1"),
-                ]
-                if form_action:
-                    act = form_action.group(1)
-                    if act.startswith("/"):
-                        act = base_url + act
-                    endpoints_to_try.insert(0, ("POST", act))
-
-                for method, endpoint in endpoints_to_try:
-                    if method == "GET":
-                        ar = sess.get(endpoint, allow_redirects=False)
-                    else:
-                        ar = sess.post(endpoint, data={"api_key": api_key, "sess_id": sess_id}, allow_redirects=False)
-                    loc = ar.headers.get("Location", "")
-                    if loc and loc.startswith("/"):
-                        loc = base_url + loc
-                    logger.info(f"Auth attempt {method} {endpoint[:70]} → {ar.status_code} loc={loc[:60] if loc else 'none'}")
-                    if loc and "request_token" in loc:
-                        parsed = urllib.parse.urlparse(loc)
-                        request_token = urllib.parse.parse_qs(parsed.query).get("request_token", [None])[0]
-                        break
-                    if loc:
-                        url = loc
-                        break
-                if request_token:
-                    break
+                # One-time consent page — can't automate, needs user to click Allow in browser
+                logger.info("Hit Kite authorize/consent page — needs one-time manual authorization")
+                raise Exception(f"NEEDS_CONSENT:{url}")
             else:
                 logger.error(f"Redirect chain stopped at hop {hop} with no Location. Body: {r.text[:300]}")
             break
