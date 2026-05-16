@@ -10,10 +10,9 @@ _exchange = None
 def get_exchange():
     global _exchange
     if _exchange is None:
-        _exchange = ccxt.binance({
+        _exchange = ccxt.binanceusdm({
             "apiKey":  os.environ["BINANCE_API_KEY"],
             "secret":  os.environ["BINANCE_API_SECRET"],
-            "options": {"defaultType": "future"},
         })
     return _exchange
 

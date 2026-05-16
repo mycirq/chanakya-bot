@@ -637,9 +637,9 @@ def handle_trade_set_submit(ack, body, client, view):
     user_id    = body["user"]["id"]
 
     market   = values["market_block"]["market"]["selected_option"]["value"]
-    budget   = float(values["budget_block"]["budget"]["value"])
-    target   = float(values["target_block"]["target"]["value"])
-    hardstop = float(values["hardstop_block"]["hardstop"]["value"])
+    budget   = float(values["budget_block"]["budget"]["value"].replace(",", ""))
+    target   = float(values["target_block"]["target"]["value"].replace("%", "").strip())
+    hardstop = float(values["hardstop_block"]["hardstop"]["value"].replace(",", ""))
 
     # Save to DB
     conn = __import__("db").get_conn()
