@@ -13,37 +13,47 @@ def get_exchange():
         _exchange = ccxt.binanceusdm({
             "apiKey":  os.environ["BINANCE_API_KEY"],
             "secret":  os.environ["BINANCE_API_SECRET"],
+            "options": {
+                "defaultType":             "future",
+                "adjustForTimeDifference": True,
+                "recvWindow":              10000,
+            }
         })
     return _exchange
 
 
 def get_futures_balance():
-    """Returns free USDT in futures wallet."""
+    """Returns available USDT in USDT-M futures wallet via direct fapi endpoint."""
     try:
-        balance = get_exchange().fetch_balance({"type": "future"})
-        return float(balance["USDT"]["free"])
+        # Calls /fapi/v2/balance — pure futures, never touches spot API
+        result = get_exchange().fapiPrivateV2GetBalance()
+        for item in result:
+            if item.get("asset") == "USDT":
+                return float(item.get("availableBalance", 0))
+        return 0.0
     except Exception as e:
         logger.error(f"Balance fetch failed: {e}")
         return 0.0
 
 
 def get_open_positions():
-    """Returns list of open positions with key fields."""
+    """Returns list of open USDT-M futures positions."""
     try:
         positions = get_exchange().fetch_positions()
         open_pos = []
         for p in positions:
-            if float(p.get("contracts") or 0) > 0:
+            contracts = abs(float(p.get("contracts") or 0))
+            if contracts > 0:
                 open_pos.append({
-                    "symbol":       p["symbol"],
-                    "side":         p["side"],
-                    "size":         float(p["contracts"]),
-                    "entry_price":  float(p["entryPrice"] or 0),
-                    "mark_price":   float(p["markPrice"] or 0),
-                    "unrealized_pnl": float(p["unrealizedPnl"] or 0),
-                    "leverage":     float(p["leverage"] or MAX_LEVERAGE),
-                    "liq_price":    float(p["liquidationPrice"] or 0),
-                    "margin":       float(p["initialMargin"] or 0),
+                    "symbol":         p["symbol"],
+                    "side":           p["side"],          # 'long' or 'short'
+                    "size":           contracts,
+                    "entry_price":    float(p["entryPrice"]       or 0),
+                    "mark_price":     float(p["markPrice"]        or 0),
+                    "unrealized_pnl": float(p["unrealizedPnl"]    or 0),
+                    "leverage":       float(p["leverage"]         or MAX_LEVERAGE),
+                    "liq_price":      float(p["liquidationPrice"] or 0),
+                    "margin":         float(p["initialMargin"]    or 0),
                 })
         return open_pos
     except Exception as e:
@@ -90,22 +100,25 @@ def place_order(symbol, side, usdt_margin, entry_price, tp_price, sl_price, leve
         limit_price = entry_price * 1.0005 if side == "long" else entry_price * 0.9995
         limit_price = ex.price_to_precision(symbol, limit_price)
         order = ex.create_order(symbol, "limit", order_side, amount, limit_price, {
-            "timeInForce": "GTC"
+            "timeInForce":  "GTC",
+            "positionSide": "BOTH",   # one-way mode
         })
-        logger.info(f"Entry order placed: {symbol} {side} {amount} @ market")
+        logger.info(f"Entry order placed: {symbol} {side} {amount} @ {limit_price}")
 
         # TP (take profit)
         ex.create_order(symbol, "take_profit_market", close_side, amount, None, {
-            "stopPrice": ex.price_to_precision(symbol, tp_price),
+            "stopPrice":    ex.price_to_precision(symbol, tp_price),
             "closePosition": True,
-            "workingType": "MARK_PRICE",
+            "workingType":  "MARK_PRICE",
+            "positionSide": "BOTH",
         })
 
         # SL (stop loss)
         ex.create_order(symbol, "stop_market", close_side, amount, None, {
-            "stopPrice": ex.price_to_precision(symbol, sl_price),
+            "stopPrice":    ex.price_to_precision(symbol, sl_price),
             "closePosition": True,
-            "workingType": "MARK_PRICE",
+            "workingType":  "MARK_PRICE",
+            "positionSide": "BOTH",
         })
 
         logger.info(f"TP @ {tp_price}, SL @ {sl_price} set for {symbol}")
