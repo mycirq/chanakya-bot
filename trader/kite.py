@@ -187,8 +187,33 @@ def login_with_totp(totp_value: str) -> str:
             break
 
         if not location:
-            # No redirect — might be a consent page or error; log body for diagnosis
-            logger.error(f"Redirect chain stopped at hop {hop} with no Location. Body: {r.text[:300]}")
+            # Check if this is the authorize/consent page — auto-submit it
+            if "connect/authorize" in url:
+                logger.info("Hit authorize/consent page — submitting authorization form")
+                # Extract sess_id from current URL
+                parsed_url = urllib.parse.urlparse(url)
+                url_params  = urllib.parse.parse_qs(parsed_url.query)
+                sess_id     = url_params.get("sess_id", [None])[0]
+                # POST to authorize to grant permission
+                auth_resp = sess.post(
+                    f"{base_url}/connect/authorize",
+                    data={"api_key": api_key, "sess_id": sess_id},
+                    allow_redirects=False
+                )
+                location = auth_resp.headers.get("Location", "")
+                if location and location.startswith("/"):
+                    location = base_url + location
+                logger.info(f"Authorize POST → status={auth_resp.status_code} location={location[:80] if location else 'none'}")
+                if location and "request_token" in location:
+                    parsed = urllib.parse.urlparse(location)
+                    request_token = urllib.parse.parse_qs(parsed.query).get("request_token", [None])[0]
+                    break
+                if location:
+                    url = location
+                    continue
+                logger.error(f"Authorize POST gave no redirect. Body: {auth_resp.text[:300]}")
+            else:
+                logger.error(f"Redirect chain stopped at hop {hop} with no Location. Body: {r.text[:300]}")
             break
 
         url = location
