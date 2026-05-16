@@ -147,6 +147,15 @@ def init_trader_db():
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS month_snapshots (
+                id SERIAL PRIMARY KEY,
+                month VARCHAR(7) NOT NULL UNIQUE,
+                start_balance DECIMAL(20,8),
+                target_pct DECIMAL(10,2),
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
         conn.commit()
         cur.close()
     else:
@@ -200,6 +209,15 @@ def init_trader_db():
                 duration_minutes INTEGER,
                 outcome TEXT,
                 lesson TEXT,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS month_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                month TEXT NOT NULL UNIQUE,
+                start_balance REAL,
+                target_pct REAL,
                 created_at TEXT DEFAULT (datetime('now'))
             )
         """)
