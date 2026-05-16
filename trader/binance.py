@@ -85,8 +85,13 @@ def place_order(symbol, side, usdt_margin, entry_price, tp_price, sl_price, leve
         order_side = "buy" if side == "long" else "sell"
         close_side = "sell" if side == "long" else "buy"
 
-        # Market entry
-        order = ex.create_order(symbol, "market", order_side, amount)
+        # Limit entry — slightly aggressive to ensure fill, cheaper than market
+        # Long: limit at ask (entry_price + 0.05%), Short: limit at bid (entry_price - 0.05%)
+        limit_price = entry_price * 1.0005 if side == "long" else entry_price * 0.9995
+        limit_price = ex.price_to_precision(symbol, limit_price)
+        order = ex.create_order(symbol, "limit", order_side, amount, limit_price, {
+            "timeInForce": "GTC"
+        })
         logger.info(f"Entry order placed: {symbol} {side} {amount} @ market")
 
         # TP (take profit)
