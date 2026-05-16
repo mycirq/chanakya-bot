@@ -15,7 +15,7 @@ from trader.memory import (
 from trader.binance import get_futures_balance
 from trader.kite_engine import get_kite_capital
 from trader.reporter import post_month_end_summary
-from trader.kite_reporter import post_kite_month_end_summary, post_totp_reminder
+from trader.kite_reporter import post_kite_month_end_summary
 from trader.config import MONTHLY_TARGET_PCT, KITE_MONTHLY_TARGET_PCT
 
 IST = pytz.timezone("Asia/Kolkata")
@@ -222,11 +222,11 @@ def start_scheduler(app):
         id="kite_daily_summary"
     )
 
-    # TOTP reminder: 8:50 AM IST, Mon–Fri
+    # Kite auto-login: 8:55 AM IST, Mon–Fri (before market open at 9:15)
     scheduler.add_job(
-        lambda: post_totp_reminder(app.client),
-        CronTrigger(hour=8, minute=50, day_of_week="mon-fri", timezone=IST),
-        id="kite_totp_reminder"
+        lambda: _run_kite_auto_login(app.client),
+        CronTrigger(hour=8, minute=55, day_of_week="mon-fri", timezone=IST),
+        id="kite_auto_login"
     )
 
     # Kite month start: 1st of month at 6 AM IST
@@ -274,6 +274,32 @@ def _run_kite_month_end_summary(app):
     stats   = get_kite_trade_stats()
     capital = get_kite_capital()
     post_kite_month_end_summary(app.client, snapshot, stats, capital)
+
+
+def _run_kite_auto_login(client):
+    """Auto-login to Kite every weekday morning using stored TOTP secret."""
+    try:
+        from trader.kite import auto_login
+        auto_login()
+        logging.info("Kite auto-login successful")
+        try:
+            from trader.config import OWNER_SLACK_ID
+            client.chat_postMessage(
+                channel=OWNER_SLACK_ID,
+                text="✅ Kite auto-login successful — FnO trading active for today."
+            )
+        except Exception:
+            pass
+    except Exception as e:
+        logging.error(f"Kite auto-login failed: {e}")
+        try:
+            from trader.config import OWNER_SLACK_ID
+            client.chat_postMessage(
+                channel=OWNER_SLACK_ID,
+                text=f"❌ Kite auto-login failed: {e}\nUse `/kite-auth` to login manually."
+            )
+        except Exception:
+            pass
 
 
 def _run_month_end_summary(app):

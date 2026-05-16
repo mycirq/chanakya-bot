@@ -596,18 +596,14 @@ def _owner_only(command, client):
 
 @app.command("/kite-auth")
 def handle_kite_auth(ack, command, client):
+    """Trigger Kite auto-login using stored TOTP secret (no manual TOTP needed)."""
     ack()
     if not _owner_only(command, client): return
     channel_id = command["channel_id"]
     user_id    = command["user_id"]
-    totp = (command.get("text") or "").strip()
-    if not totp or not totp.isdigit() or len(totp) != 6:
-        _post_reply(client, channel_id, user_id,
-                    "Usage: `/kite-auth 123456` — enter your 6-digit TOTP.")
-        return
     try:
-        from trader.kite import login_with_totp
-        login_with_totp(totp)
+        from trader.kite import auto_login
+        auto_login()
         _post_reply(client, channel_id, user_id,
                     "✅ Kite authorized. FnO trading active until 6 AM tomorrow.")
     except Exception as e:

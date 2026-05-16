@@ -103,6 +103,17 @@ def _store_token(access_token: str):
 
 # ── Login ──────────────────────────────────────────────────────────────────────
 
+def auto_login() -> str:
+    """Auto-login using stored TOTP secret — no user input needed."""
+    import pyotp
+    secret = os.environ.get("KITE_TOTP_SECRET", "")
+    if not secret:
+        raise Exception("KITE_TOTP_SECRET not set in env vars")
+    totp = pyotp.TOTP(secret).now()
+    logger.info(f"Auto-generated TOTP for login")
+    return login_with_totp(totp)
+
+
 def login_with_totp(totp_value: str) -> str:
     """
     Full automated login flow using TOTP.
