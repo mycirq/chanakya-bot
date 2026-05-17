@@ -652,24 +652,6 @@ def handle_kite_token(ack, command, client):
         _post_reply(client, channel_id, user_id, f"❌ Token exchange failed: {e}")
 
 
-# ── /server-ip command ─────────────────────────────────────────────────────────
-
-@app.command("/server-ip")
-def handle_server_ip(ack, command, client):
-    """Returns the server's outbound IP — needed for Binance API whitelist."""
-    ack()
-    if not _owner_only(command, client): return
-    channel_id = command["channel_id"]
-    user_id    = command["user_id"]
-    try:
-        import requests as req
-        ip = req.get("https://api4.ipify.org", timeout=5).text.strip()
-        _post_reply(client, channel_id, user_id,
-            f"🌐 Server outbound IP: `{ip}`\nAdd this to Binance API whitelist.")
-    except Exception as e:
-        _post_reply(client, channel_id, user_id, f"❌ Could not fetch IP: {e}")
-
-
 # ── /trade-test command ────────────────────────────────────────────────────────
 
 @app.command("/trade-test")
@@ -915,14 +897,13 @@ if __name__ == "__main__":
     start_scheduler(app)
     handler = SocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])
     try:
-        import requests as _req
         from trader.config import OWNER_SLACK_ID
-        _ip = _req.get("https://api4.ipify.org", timeout=5).text.strip()
-        logging.info(f"Server outbound IP: {_ip}")
-        # DM owner with new IP on every startup so Binance whitelist can be updated
+        from datetime import datetime
+        import pytz
+        now = datetime.now(pytz.timezone("Asia/Kolkata")).strftime("%d %b %Y, %I:%M %p IST")
         app.client.chat_postMessage(
             channel=OWNER_SLACK_ID,
-            text=f"🚀 Bot started. Server IP: `{_ip}`\nIf Binance trades fail, add this IP to whitelist at binance.com/en/my/settings/api-management"
+            text=f"🚀 *Chanakya Bot deployed* — {now}\nCrypto scanner active. Use `/kite-auth` to activate FnO."
         )
     except Exception:
         pass
