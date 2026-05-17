@@ -11,3 +11,4 @@ pandas>=2.0.0
 pandas-ta>=0.3.14b
 kiteconnect>=5.0.1
 pyotp>=2.9.0
+PySocks>=1.7.1

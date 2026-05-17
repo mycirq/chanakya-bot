@@ -17,7 +17,11 @@ def get_exchange():
                 "defaultType":             "future",
                 "adjustForTimeDifference": True,
                 "recvWindow":              10000,
-            }
+            },
+            "proxies": {
+                "http":  "socks5h://92.4.80.136:1080",
+                "https": "socks5h://92.4.80.136:1080",
+            },
         })
     return _exchange
 
