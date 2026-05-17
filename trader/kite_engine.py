@@ -64,22 +64,10 @@ def get_kite_total_loss_inr() -> float:
 
 
 def get_kite_capital() -> float:
-    """Estimate current capital = start capital + realized P&L."""
+    """Returns live available margin from Kite equity (FnO) segment."""
     try:
-        conn = get_conn()
-        if hasattr(conn, "cursor"):
-            from psycopg2.extras import RealDictCursor
-            cur = conn.cursor(cursor_factory=RealDictCursor)
-            cur.execute("SELECT COALESCE(SUM(pnl_inr), 0) as total FROM kite_memory")
-            row = cur.fetchone(); cur.close()
-        else:
-            row = conn.execute(
-                "SELECT COALESCE(SUM(pnl_inr), 0) as total FROM kite_memory"
-            ).fetchone()
-            row = dict(row) if row else None
-        conn.close()
-        realized_pnl = float(row["total"]) if row else 0
-        return KITE_CAPITAL_INR + realized_pnl
+        margins = get_kite().margins()
+        return float(margins["equity"]["net"])
     except Exception as e:
         logger.error(f"get_kite_capital failed: {e}")
         return KITE_CAPITAL_INR
