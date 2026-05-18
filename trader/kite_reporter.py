@@ -169,6 +169,28 @@ def post_kite_hard_stop(client, loss_inr):
         logger.error(f"post_kite_hard_stop failed: {e}")
 
 
+def post_kite_scan_result(client, scores, threshold, skip_reason=None):
+    """DM owner with every scan result — scores for all indices."""
+    try:
+        from datetime import datetime
+        from trader.config import IST
+        now = datetime.now(IST).strftime("%H:%M")
+        lines = [f"🔍 *{now} Kite Scan*"]
+        for underlying, score, direction, reason in scores:
+            arrow = "↑" if direction == "long" else ("↓" if direction == "short" else "—")
+            near  = " 🔥 near miss!" if threshold * 0.8 <= score < threshold else ""
+            fired = " ✅ TRADE!" if score >= threshold and not skip_reason else ""
+            lines.append(f"• {underlying}: *{score}/100* {arrow}{near}{fired}\n  _{reason}_")
+        if skip_reason:
+            lines.append(f"⏭ Skipped: _{skip_reason}_")
+        elif not any(s >= threshold for _, s, _, _ in scores):
+            lines.append(f"❌ No trade — need {threshold}+")
+        dm = client.conversations_open(users=OWNER_SLACK_ID)
+        client.chat_postMessage(channel=dm["channel"]["id"], text="\n".join(lines))
+    except Exception as e:
+        logger.error(f"post_kite_scan_result failed: {e}")
+
+
 def post_kite_daily_summary(client, stats, balance_inr, open_count):
     cid = _get_channel_id(client)
     if not cid:

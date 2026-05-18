@@ -14,7 +14,8 @@ from trader.kite_strategy import (
 )
 from trader.kite_reporter import (
     post_kite_thesis, post_kite_opened, post_kite_closed,
-    post_kite_drawdown_warning, post_kite_hard_stop, post_kite_daily_summary
+    post_kite_drawdown_warning, post_kite_hard_stop, post_kite_daily_summary,
+    post_kite_scan_result
 )
 from trader.config import (
     KITE_INDICES, KITE_MIN_SIGNAL_SCORE, KITE_HARD_STOP_INR,
@@ -245,13 +246,15 @@ def run_kite_scan(app):
         logger.info(f"Kite max positions ({KITE_MAX_POSITIONS}) reached")
         return
 
-    # Score all indices, pick best
-    candidates = []
+    # Score ALL indices — always report
+    all_scores = []
     for underlying in KITE_INDICES:
         score, direction, reason = get_index_signal(underlying)
-        if score >= KITE_MIN_SIGNAL_SCORE and direction:
-            candidates.append((score, underlying, direction, reason))
+        all_scores.append((underlying, score, direction, reason))
 
+    post_kite_scan_result(app.client, all_scores, KITE_MIN_SIGNAL_SCORE)
+
+    candidates = [(s, u, d, r) for u, s, d, r in all_scores if s >= KITE_MIN_SIGNAL_SCORE and d]
     if not candidates:
         logger.info("No Kite signals above threshold")
         return
