@@ -18,23 +18,29 @@ logger = logging.getLogger(__name__)
 
 def get_index_signal(underlying: str):
     """
-    Fetch 5-min OHLCV for index, score the signal.
+    Full FnO signal: Technical + VIX + Options Chain + FII.
     Returns (score, direction, reason) or (0, None, reason).
     """
-    cfg = KITE_INDICES.get(underlying)
-    if not cfg:
-        return 0, None, f"unknown underlying {underlying}"
+    from trader.fno_signals import get_full_fno_analysis
 
-    # Use 5-min candles, last 3 days (enough for EMA200 on 5min)
-    ohlcv = get_ohlcv(cfg["token"], interval="5minute", days=7)
-    if not ohlcv:
-        return 0, None, "no OHLCV data"
+    analysis = get_full_fno_analysis(underlying)
+    if not analysis or analysis.get("error"):
+        return 0, None, analysis.get("error", "analysis failed")
 
-    df = compute_indicators(ohlcv)
-    if df is None or len(df) < 5:
-        return 0, None, "insufficient candles after indicator calc"
+    score     = analysis["final_score"]
+    direction = analysis["direction"]
 
-    return score_signal(df)
+    # Build compact reason string
+    parts = []
+    tech = analysis.get("technical", {})
+    if tech.get("reason"):
+        parts.append(tech["reason"])
+    parts.append(analysis["vix"]["summary"])
+    parts.append(analysis["options_chain"]["summary"])
+    parts.append(analysis["fii"]["summary"])
+
+    reason = " | ".join(p for p in parts if p)
+    return score, direction, reason
 
 
 def get_atm_strike(underlying: str, ltp: float) -> float:

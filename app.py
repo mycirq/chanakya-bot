@@ -870,6 +870,84 @@ def handle_trade_target(ack, command, client):
                 f"✅ {label} monthly target set to *{target_pct:.0f}%*.")
 
 
+# ── /analyse command ──────────────────────────────────────────────────────────
+
+NSE_INDEX_OPTIONS = [
+    {"text": {"type": "plain_text", "text": "NIFTY 50"},   "value": "NIFTY"},
+    {"text": {"type": "plain_text", "text": "BANK NIFTY"}, "value": "BANKNIFTY"},
+]
+
+@app.command("/analyse")
+def handle_analyse(ack, command, client):
+    ack()
+    client.views_open(
+        trigger_id=command["trigger_id"],
+        view={
+            "type": "modal",
+            "callback_id": "analyse_modal",
+            "private_metadata": command["channel_id"],
+            "title": {"type": "plain_text", "text": "FnO Analysis"},
+            "submit": {"type": "plain_text", "text": "Analyse"},
+            "close":  {"type": "plain_text", "text": "Cancel"},
+            "blocks": [
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn",
+                     "text": "*Full FnO signal analysis* — Technical + India VIX + Options Chain (PCR/MaxPain/OI) + FII positioning"}
+                },
+                {
+                    "type": "input",
+                    "block_id": "index_block",
+                    "label": {"type": "plain_text", "text": "Select Index"},
+                    "element": {
+                        "type": "static_select",
+                        "action_id": "index_pick",
+                        "placeholder": {"type": "plain_text", "text": "Choose index..."},
+                        "options": NSE_INDEX_OPTIONS,
+                        "initial_option": NSE_INDEX_OPTIONS[0],
+                    }
+                },
+                {
+                    "type": "context",
+                    "elements": [{"type": "mrkdwn",
+                     "text": "Analysis takes ~10 seconds — fetches live VIX, options chain OI, and FII data."}]
+                }
+            ]
+        }
+    )
+
+
+@app.view("analyse_modal")
+def handle_analyse_submit(ack, body, client, view):
+    ack()
+    channel_id = view["private_metadata"]
+    user_id    = body["user"]["id"]
+    underlying = view["state"]["values"]["index_block"]["index_pick"]["selected_option"]["value"]
+
+    # Post "analysing..." message so user knows it's working
+    try:
+        client.chat_postEphemeral(
+            channel=channel_id, user=user_id,
+            text=f"Analysing {underlying}... fetching VIX + options chain + FII data (~10 sec)"
+        )
+    except Exception:
+        pass
+
+    try:
+        from trader.fno_signals import get_full_fno_analysis
+        from trader.kite_reporter import post_fno_analysis
+        analysis = get_full_fno_analysis(underlying)
+        post_fno_analysis(client, channel_id, analysis)
+    except Exception as e:
+        try:
+            client.chat_postEphemeral(
+                channel=channel_id, user=user_id,
+                text=f"Analysis failed: {e}"
+            )
+        except Exception:
+            pass
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

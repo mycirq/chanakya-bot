@@ -169,6 +169,84 @@ def post_kite_hard_stop(client, loss_inr):
         logger.error(f"post_kite_hard_stop failed: {e}")
 
 
+def post_fno_analysis(client, channel_id, analysis: dict):
+    """Post full FnO analysis to a Slack channel."""
+    try:
+        u         = analysis["underlying"]
+        score     = analysis["final_score"]
+        direction = analysis["direction"]
+        ts        = analysis["timestamp"]
+
+        arrow     = "🟢 CALL (Bullish)" if direction == "long" else ("🔴 PUT (Bearish)" if direction == "short" else "⚪ No Clear Signal")
+        conf      = "High" if score >= 70 else ("Moderate" if score >= 50 else "Low")
+        conf_emoji = "🔥" if score >= 70 else ("⚡" if score >= 50 else "❄️")
+
+        tech  = analysis.get("technical", {})
+        vix   = analysis.get("vix", {})
+        oi    = analysis.get("options_chain", {})
+        fii   = analysis.get("fii", {})
+        chain = oi.get("data") or {}
+
+        price   = analysis.get("current_price", 0)
+        atm     = analysis.get("atm")
+        expiry  = str(analysis.get("expiry", ""))
+        window  = analysis.get("entry_window", "—")
+        tl      = analysis.get("total_long", 0)
+        ts_     = analysis.get("total_short", 0)
+
+        # Score bar
+        filled = int(score / 10)
+        bar    = "█" * filled + "░" * (10 - filled)
+
+        # Option recommendation
+        opt_type = "CE" if direction == "long" else "PE"
+        rec_text = ""
+        if atm and direction:
+            rec_text = (
+                f"*Contract:* {u}{expiry.replace('-','')} {atm:.0f} {opt_type} (ATM)\n"
+                f"*Target:* +50% on premium | *SL:* -30% on premium\n"
+                f"*Expected ROI:* 40–60% on premium if TP hit\n"
+                f"*Best Entry:* {window}"
+            )
+        else:
+            rec_text = f"*Best Entry Window:* {window}\n_No clear directional signal — wait for confirmation._"
+
+        blocks = [
+            {"type": "header", "text": {"type": "plain_text",
+             "text": f"{conf_emoji} {u} FnO Analysis — {arrow}"}},
+            {"type": "section", "fields": [
+                {"type": "mrkdwn", "text": f"*Overall Score:*\n{bar} {score}/100"},
+                {"type": "mrkdwn", "text": f"*Confidence:*\n{conf}"},
+                {"type": "mrkdwn", "text": f"*Long pts:*\n{tl}/80"},
+                {"type": "mrkdwn", "text": f"*Short pts:*\n{ts_}/80"},
+            ]},
+            {"type": "divider"},
+            {"type": "section", "text": {"type": "mrkdwn",
+             "text": f"*📈 Technical (25 pts max) — {tech.get('long_pts', 0)}L / {tech.get('short_pts', 0)}S*\n{tech.get('reason', 'no data')}"}},
+            {"type": "section", "text": {"type": "mrkdwn",
+             "text": f"*🌡 India VIX (20 pts max) — {vix.get('long_pts', 0)}L / {vix.get('short_pts', 0)}S*\n{vix.get('summary', 'no data')}"}},
+            {"type": "section", "text": {"type": "mrkdwn",
+             "text": f"*📊 Options Chain (20 pts max) — {oi.get('long_pts', 0)}L / {oi.get('short_pts', 0)}S*\n{oi.get('summary', 'no data')}" +
+             (f"\nPCR: {chain.get('pcr','—')} | Max Pain: {chain.get('max_pain','—'):.0f} | Call Wall: {chain.get('call_wall','—'):.0f} | Put Wall: {chain.get('put_wall','—'):.0f}" if chain else "")}},
+            {"type": "section", "text": {"type": "mrkdwn",
+             "text": f"*🏦 FII Positioning (15 pts max) — {fii.get('long_pts', 0)}L / {fii.get('short_pts', 0)}S*\n{fii.get('summary', 'no data')}"}},
+            {"type": "divider"},
+            {"type": "section", "text": {"type": "mrkdwn",
+             "text": f"*📌 Recommendation*\n{rec_text}"}},
+            {"type": "context", "elements": [
+                {"type": "mrkdwn", "text": f"Chanakya Analysis • {u} • {ts}"}
+            ]}
+        ]
+
+        client.chat_postMessage(
+            channel=channel_id,
+            text=f"{conf_emoji} {u} FnO Analysis — {score}/100 {arrow}",
+            blocks=blocks
+        )
+    except Exception as e:
+        logger.error(f"post_fno_analysis failed: {e}")
+
+
 def post_kite_scan_result(client, scores, threshold, skip_reason=None):
     """DM owner with every scan result — scores for all indices."""
     try:
