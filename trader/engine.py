@@ -16,7 +16,8 @@ from trader.memory import (
 )
 from trader.reporter import (
     post_pre_trade_thesis, post_trade_opened, post_trade_closed,
-    post_drawdown_warning, post_hard_stop, post_daily_summary
+    post_drawdown_warning, post_hard_stop, post_daily_summary,
+    post_crypto_scan_result
 )
 from trader.config import MIN_SIGNAL_SCORE, MAX_LEVERAGE, TOP_PAIRS_COUNT
 from db import get_conn
@@ -102,23 +103,34 @@ def run_scan(app):
     db_pos     = get_open_positions_db()
     open_syms  = {p["symbol"] for p in open_pos}
 
-    allowed, reason = can_open_trade(open_pos, balance, total_loss)
-    if not allowed:
-        logger.info(f"Cannot open trade: {reason}")
-        return
+    allowed, allow_reason = can_open_trade(open_pos, balance, total_loss)
 
-    # Scan top pairs
+    # Scan top pairs — always score all, report results
     pairs = get_top_futures_pairs(TOP_PAIRS_COUNT)
-    candidates = []
+    all_scores = []
+    dfs = {}
 
     for symbol in pairs:
         if symbol in open_syms:
-            continue  # already in this pair
+            continue
         ohlcv = fetch_ohlcv(symbol, "1h", 220)
         df    = compute_indicators(ohlcv)
-        score, direction, reason = score_signal(df)
-        if score >= MIN_SIGNAL_SCORE and direction:
-            candidates.append((score, symbol, direction, reason, df))
+        score, direction, sig_reason = score_signal(df)
+        all_scores.append((score, symbol, direction, sig_reason))
+        if df is not None:
+            dfs[symbol] = df
+
+    if not allowed:
+        logger.info(f"Cannot open trade: {allow_reason}")
+        post_crypto_scan_result(app.client, all_scores, MIN_SIGNAL_SCORE, zone, skip_reason=allow_reason)
+        return
+
+    post_crypto_scan_result(app.client, all_scores, MIN_SIGNAL_SCORE, zone)
+
+    candidates = [
+        (s, sym, d, r, dfs[sym]) for s, sym, d, r in all_scores
+        if s >= MIN_SIGNAL_SCORE and d and sym in dfs
+    ]
 
     if not candidates:
         logger.info("No signals above threshold this scan")
@@ -126,9 +138,9 @@ def run_scan(app):
 
     # Sort by score descending, take top signal
     candidates.sort(key=lambda x: x[0], reverse=True)
-    score, symbol, direction, reason, df = candidates[0]
+    score, symbol, direction, sig_reason, df = candidates[0]
 
-    logger.info(f"Best signal: {symbol} {direction} score={score} — {reason}")
+    logger.info(f"Best signal: {symbol} {direction} score={score} — {sig_reason}")
 
     # Re-check we can still open (race condition guard)
     allowed, block_reason = can_open_trade(get_open_positions(), balance, total_loss)
@@ -157,7 +169,7 @@ def run_scan(app):
     # Post thesis BEFORE executing
     post_pre_trade_thesis(
         app.client, symbol, direction, entry_price,
-        tp_price, sl_price, margin, MAX_LEVERAGE, score, reason, rr
+        tp_price, sl_price, margin, MAX_LEVERAGE, score, sig_reason, rr
     )
 
     # Place order
@@ -177,14 +189,14 @@ def run_scan(app):
         sl_price=sl_price, liq_price=liq_price,
         margin_usdt=margin, leverage=MAX_LEVERAGE,
         size=margin * MAX_LEVERAGE / entry_price,
-        signal_score=score, signal_reason=reason
+        signal_score=score, signal_reason=sig_reason
     )
 
     # Report to Slack
     post_trade_opened(
         app.client, symbol, direction, entry_price,
         tp_price, sl_price, liq_price, margin,
-        MAX_LEVERAGE, score, reason,
+        MAX_LEVERAGE, score, sig_reason,
         abs(tp_price - entry_price) / entry_price * 100
     )
     logger.info(f"Trade opened: {symbol} {direction} @ {entry_price} | pos_id={pos_id}")

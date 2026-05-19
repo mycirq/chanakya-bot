@@ -14,6 +14,30 @@ def _get_channel_id(client):
     return None
 
 
+def post_crypto_scan_result(client, all_scores, threshold, zone, skip_reason=None):
+    """DM owner with top 5 scores every crypto scan."""
+    try:
+        from datetime import datetime
+        import pytz
+        from trader.config import OWNER_SLACK_ID
+        now = datetime.now(pytz.timezone("Asia/Kolkata")).strftime("%H:%M")
+        top5 = sorted(all_scores, key=lambda x: x[0], reverse=True)[:5]
+        lines = [f"🔍 *{now} Crypto Scan* | zone: {zone} | {len(all_scores)} pairs"]
+        for score, symbol, direction, reason in top5:
+            arrow = "↑" if direction == "long" else ("↓" if direction == "short" else "—")
+            near  = " 🔥 near miss!" if threshold * 0.8 <= score < threshold else ""
+            fired = " ✅ TRADE!" if score >= threshold and not skip_reason else ""
+            lines.append(f"• {symbol}: *{score}/100* {arrow}{near}{fired}\n  _{reason}_")
+        if skip_reason:
+            lines.append(f"⏭ Skipped: _{skip_reason}_")
+        elif not any(s >= threshold for s, _, _, _ in all_scores):
+            lines.append(f"❌ No trade — need {threshold}+")
+        dm = client.conversations_open(users=OWNER_SLACK_ID)
+        client.chat_postMessage(channel=dm["channel"]["id"], text="\n".join(lines))
+    except Exception as e:
+        logger.error(f"post_crypto_scan_result failed: {e}")
+
+
 def post_pre_trade_thesis(client, symbol, direction, entry, tp, sl,
                           margin, leverage, score, reason, rr):
     """Posted BEFORE executing — thesis + proof, no approval needed."""
