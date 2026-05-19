@@ -26,7 +26,7 @@ def get_index_signal(underlying: str):
         return 0, None, f"unknown underlying {underlying}"
 
     # Use 5-min candles, last 3 days (enough for EMA200 on 5min)
-    ohlcv = get_ohlcv(cfg["token"], interval="5minute", days=3)
+    ohlcv = get_ohlcv(cfg["token"], interval="5minute", days=7)
     if not ohlcv:
         return 0, None, "no OHLCV data"
 
