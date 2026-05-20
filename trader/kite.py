@@ -16,6 +16,12 @@ logger = logging.getLogger(__name__)
 _kite: KiteConnect | None = None
 _instruments_cache: list | None = None
 
+# Route through Oracle VM SOCKS5 proxy for static IP (Kite requires whitelisted IP)
+KITE_PROXY = {
+    "http":  "socks5h://92.4.80.136:1080",
+    "https": "socks5h://92.4.80.136:1080",
+}
+
 
 # ── Singleton ──────────────────────────────────────────────────────────────────
 
@@ -24,6 +30,7 @@ def get_kite() -> KiteConnect:
     global _kite
     if _kite is None:
         _kite = KiteConnect(api_key=os.environ["KITE_API_KEY"])
+        _kite.reqsession.proxies.update(KITE_PROXY)
     token = _get_stored_token()
     if token:
         _kite.set_access_token(token)
@@ -125,6 +132,7 @@ def login_with_totp(totp_value: str) -> str:
     password   = os.environ["KITE_PASSWORD"]
 
     sess = requests.Session()
+    sess.proxies.update(KITE_PROXY)
     sess.headers.update({
         "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
         "Accept": "application/json, text/plain, */*",
