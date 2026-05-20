@@ -6,6 +6,7 @@ from trader.config import MAX_LEVERAGE
 logger = logging.getLogger(__name__)
 
 _exchange = None
+_last_known_balance = None  # cached so proxy blips don't report $0
 
 def get_exchange():
     global _exchange
@@ -27,16 +28,23 @@ def get_exchange():
 
 
 def get_futures_balance():
-    """Returns available USDT in USDT-M futures wallet via direct fapi endpoint."""
+    """Returns available USDT in USDT-M futures wallet via direct fapi endpoint.
+    Falls back to last known balance if fetch fails (proxy blip protection)."""
+    global _last_known_balance
     try:
-        # Calls /fapi/v2/balance — pure futures, never touches spot API
         result = get_exchange().fapiPrivateV2GetBalance()
         for item in result:
             if item.get("asset") == "USDT":
-                return float(item.get("availableBalance", 0))
+                balance = float(item.get("availableBalance", 0))
+                if balance > 0:
+                    _last_known_balance = balance
+                return balance
         return 0.0
     except Exception as e:
         logger.error(f"Balance fetch failed: {e}")
+        if _last_known_balance is not None:
+            logger.warning(f"Using cached balance ${_last_known_balance:.2f} USDT")
+            return _last_known_balance
         return 0.0
 
 
