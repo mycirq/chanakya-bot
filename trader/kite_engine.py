@@ -280,16 +280,17 @@ def run_kite_scan(app):
     tp, sl = calculate_premium_levels(premium)
     expiry = str(_get_expiry_from_symbol(tradingsymbol))
 
-    # Post thesis
+    # Post thesis first (even if order fails, user sees the signal)
     post_kite_thesis(app.client, underlying, direction, tradingsymbol,
                      premium, tp, sl, quantity, lot_size, score, reason)
 
     # Place order
     order_id = _place_kite_order(tradingsymbol, quantity)
     if not order_id:
+        logger.warning(f"Kite order FAILED for {tradingsymbol} — not saving position")
         return
 
-    # Save to DB
+    # Save to DB only on successful order
     pos_id = _save_kite_position(
         underlying, direction, tradingsymbol, expiry,
         option_type, premium, tp, sl, quantity, lot_size, score, reason
