@@ -298,24 +298,36 @@ def get_nearest_weekly_expiry(underlying: str) -> date:
     instruments = get_nfo_instruments()
     if instruments:
         expiries = set()
+        sample_expiry = None
         for inst in instruments:
             if (inst.get("name") == underlying
                     and inst.get("instrument_type") in ("CE", "PE")
                     and inst.get("expiry")):
                 exp = inst["expiry"]
+                if sample_expiry is None:
+                    sample_expiry = exp
+                    logger.info(f"Expiry sample for {underlying}: {exp!r} type={type(exp).__name__}")
                 if isinstance(exp, datetime):
                     exp = exp.date()
+                elif isinstance(exp, str):
+                    try:
+                        exp = date.fromisoformat(exp)
+                    except ValueError:
+                        continue
                 if exp >= today:
                     expiries.add(exp)
 
         if expiries:
             sorted_expiries = sorted(expiries)
+            logger.info(f"{underlying} expiries found: {sorted_expiries[:5]} (total {len(sorted_expiries)})")
             # If it's expiry day after 14:30, skip to next expiry
             if (sorted_expiries[0] == today
                     and now.hour >= 14 and now.minute >= 30
                     and len(sorted_expiries) > 1):
                 return sorted_expiries[1]
             return sorted_expiries[0]
+        else:
+            logger.warning(f"No future expiries found for {underlying} (today={today}, sample={sample_expiry!r})")
 
     # Fallback: calculate Thursday
     days_to_thursday = (3 - today.weekday()) % 7

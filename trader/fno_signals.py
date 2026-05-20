@@ -12,7 +12,7 @@ Scoring breakdown (100 pts total):
 """
 import logging
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, date, timedelta
 
 from trader.config import IST, KITE_INDICES
 
@@ -100,6 +100,11 @@ def get_options_chain_data(underlying: str):
             inst_expiry = inst.get("expiry")
             if isinstance(inst_expiry, datetime):
                 inst_expiry = inst_expiry.date()
+            elif isinstance(inst_expiry, str):
+                try:
+                    inst_expiry = date.fromisoformat(inst_expiry)
+                except ValueError:
+                    continue
             if (inst.get("name") == underlying
                     and inst_expiry == expiry
                     and float(inst.get("strike", 0)) in strikes
