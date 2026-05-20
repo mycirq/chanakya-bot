@@ -287,18 +287,41 @@ def get_nfo_instruments() -> list:
 
 def get_nearest_weekly_expiry(underlying: str) -> date:
     """
-    Returns nearest weekly expiry (Thursday).
-    If today is Thursday after 14:30 IST, returns next Thursday.
+    Returns nearest expiry from actual instrument list.
+    After SEBI Nov 2024 rules: only NIFTY has weekly (Thu), BANKNIFTY is monthly only.
+    Falls back to calculated Thursday if instruments unavailable.
     """
     now = datetime.now(IST)
     today = now.date()
-    days_to_thursday = (3 - today.weekday()) % 7  # Thursday=3
-    nearest = today + timedelta(days=days_to_thursday)
 
-    # If it's Thursday and market is almost done, use next week
+    # Try to get actual expiry from instruments
+    instruments = get_nfo_instruments()
+    if instruments:
+        expiries = set()
+        for inst in instruments:
+            if (inst.get("name") == underlying
+                    and inst.get("instrument_type") in ("CE", "PE")
+                    and inst.get("expiry")):
+                exp = inst["expiry"]
+                if isinstance(exp, datetime):
+                    exp = exp.date()
+                if exp >= today:
+                    expiries.add(exp)
+
+        if expiries:
+            sorted_expiries = sorted(expiries)
+            # If it's expiry day after 14:30, skip to next expiry
+            if (sorted_expiries[0] == today
+                    and now.hour >= 14 and now.minute >= 30
+                    and len(sorted_expiries) > 1):
+                return sorted_expiries[1]
+            return sorted_expiries[0]
+
+    # Fallback: calculate Thursday
+    days_to_thursday = (3 - today.weekday()) % 7
+    nearest = today + timedelta(days=days_to_thursday)
     if days_to_thursday == 0 and now.hour >= 14 and now.minute >= 30:
         nearest = today + timedelta(days=7)
-
     return nearest
 
 

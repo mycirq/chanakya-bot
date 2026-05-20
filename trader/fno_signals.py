@@ -97,8 +97,11 @@ def get_options_chain_data(underlying: str):
         quote_keys = []
         inst_map   = {}
         for inst in instruments:
+            inst_expiry = inst.get("expiry")
+            if isinstance(inst_expiry, datetime):
+                inst_expiry = inst_expiry.date()
             if (inst.get("name") == underlying
-                    and inst.get("expiry") == expiry
+                    and inst_expiry == expiry
                     and float(inst.get("strike", 0)) in strikes
                     and inst.get("instrument_type") in ("CE", "PE")):
                 key = f"NFO:{inst['tradingsymbol']}"
@@ -344,10 +347,21 @@ def get_full_fno_analysis(underlying: str) -> dict:
         "summary":    fii_sum,
     }
 
-    # Totals
+    # Totals — normalize against actually available points
     total_long  = tech_long  + vl + ol + fl
     total_short = tech_short + vs + os_ + fs
-    max_possible = 80  # 25+20+20+15
+
+    # Only count components that had data
+    max_possible = 0
+    if tech_dir is not None:
+        max_possible += 25
+    if vix_val is not None:
+        max_possible += 20
+    if chain is not None:
+        max_possible += 20
+    if net_fii is not None:
+        max_possible += 15
+    max_possible = max(max_possible, 1)  # avoid division by zero
 
     if total_long > total_short:
         direction   = "long"
