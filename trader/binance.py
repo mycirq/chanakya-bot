@@ -6,7 +6,7 @@ from trader.config import MAX_LEVERAGE
 logger = logging.getLogger(__name__)
 
 _exchange = None
-_last_known_balance = None  # cached so proxy blips don't report $0
+_last_known_balance = None  # in-memory cache (first line of defence)
 
 def get_exchange():
     global _exchange
@@ -27,9 +27,51 @@ def get_exchange():
     return _exchange
 
 
+def _save_balance_to_db(balance: float):
+    try:
+        from db import get_conn
+        conn = get_conn()
+        if hasattr(conn, "cursor"):
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO kite_config (key, value, updated_at)
+                VALUES ('binance_balance', %s, NOW())
+                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+            """, (str(balance),))
+            conn.commit(); cur.close()
+        else:
+            conn.execute("""
+                INSERT OR REPLACE INTO kite_config (key, value, updated_at)
+                VALUES ('binance_balance', ?, datetime('now'))
+            """, (str(balance),))
+            conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.warning(f"Could not persist balance to DB: {e}")
+
+
+def _load_balance_from_db() -> float | None:
+    try:
+        from db import get_conn
+        conn = get_conn()
+        if hasattr(conn, "cursor"):
+            from psycopg2.extras import RealDictCursor
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute("SELECT value FROM kite_config WHERE key = 'binance_balance'")
+            row = cur.fetchone(); cur.close()
+        else:
+            row = conn.execute(
+                "SELECT value FROM kite_config WHERE key = 'binance_balance'"
+            ).fetchone()
+            row = dict(row) if row else None
+        conn.close()
+        return float(row["value"]) if row else None
+    except Exception:
+        return None
+
+
 def get_futures_balance():
-    """Returns available USDT in USDT-M futures wallet via direct fapi endpoint.
-    Falls back to last known balance if fetch fails (proxy blip protection)."""
+    """Returns available USDT. Falls back to DB-persisted balance on proxy failure."""
     global _last_known_balance
     try:
         result = get_exchange().fapiPrivateV2GetBalance()
@@ -38,13 +80,21 @@ def get_futures_balance():
                 balance = float(item.get("availableBalance", 0))
                 if balance > 0:
                     _last_known_balance = balance
+                    _save_balance_to_db(balance)
                 return balance
         return 0.0
     except Exception as e:
         logger.error(f"Balance fetch failed: {e}")
+        # 1. Try in-memory cache
         if _last_known_balance is not None:
-            logger.warning(f"Using cached balance ${_last_known_balance:.2f} USDT")
+            logger.warning(f"Proxy blip — using in-memory balance ${_last_known_balance:.2f}")
             return _last_known_balance
+        # 2. Fall back to DB-persisted balance
+        db_balance = _load_balance_from_db()
+        if db_balance is not None:
+            _last_known_balance = db_balance
+            logger.warning(f"Proxy blip — using DB-persisted balance ${db_balance:.2f}")
+            return db_balance
         return 0.0
 
 
