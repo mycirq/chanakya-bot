@@ -23,7 +23,7 @@ MIN_RR_RATIO       = 1.5      # min reward:risk
 # ── Strategy ───────────────────────────────────────────────────────────────────
 SCAN_INTERVAL_MIN  = 15       # scan every 15 minutes
 TOP_PAIRS_COUNT    = 30       # scan top N pairs by volume
-MIN_SIGNAL_SCORE   = 65       # 0-100, only trade above this
+MIN_SIGNAL_SCORE   = 55       # 0-100 — moderate threshold, filters noise
 
 # ── Trading zones IST (hour, minute) ──────────────────────────────────────────
 # Each tuple: (start_hour, start_min, end_hour, end_min)
@@ -49,7 +49,7 @@ KITE_MAX_POSITIONS      = 3          # max open FnO positions
 KITE_MAX_POSITION_PCT   = 0.20       # max 20% capital per trade
 KITE_PREMIUM_TP_PCT     = 0.50       # 50% gain on premium → TP
 KITE_PREMIUM_SL_PCT     = 0.30       # 30% loss on premium → SL
-KITE_MIN_SIGNAL_SCORE   = 65         # same threshold as crypto
+KITE_MIN_SIGNAL_SCORE   = 50         # lowered for multi-signal system (VIX+PCR+OI+FII+Tech)
 KITE_SCAN_INTERVAL_MIN  = 5          # scan every 5 min during market hours
 
 # Market hours IST
