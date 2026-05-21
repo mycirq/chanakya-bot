@@ -178,7 +178,7 @@ def run_scan(app):
     entry_price = float(ticker[-1][4])  # last close
 
     # Calculate TP / SL
-    tp_price, sl_price, rr = calculate_tp_sl(entry_price, direction, df)
+    tp_price, sl_price, rr = calculate_tp_sl(entry_price, direction, df, MAX_LEVERAGE)
     if rr < 1.5:
         logger.info(f"RR {rr} below minimum for {symbol}, skipping")
         return

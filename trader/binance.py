@@ -93,6 +93,19 @@ def place_order(symbol, side, usdt_margin, entry_price, tp_price, sl_price, leve
     usdt_margin: margin in USDT (not notional)
     Returns order dict or None.
     """
+    # Safety: SL must never be past liquidation price
+    liq_distance = entry_price / leverage  # approximate liq distance
+    if side == "long":
+        est_liq = entry_price - liq_distance * 0.95  # 95% of liq distance
+        if sl_price <= est_liq:
+            logger.error(f"SL {sl_price} is at/below est. liq {est_liq:.6f} for {symbol} long — aborting")
+            return None
+    else:
+        est_liq = entry_price + liq_distance * 0.95
+        if sl_price >= est_liq:
+            logger.error(f"SL {sl_price} is at/above est. liq {est_liq:.6f} for {symbol} short — aborting")
+            return None
+
     ex = get_exchange()
     try:
         set_margin_mode(symbol)

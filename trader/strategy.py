@@ -122,20 +122,35 @@ def score_signal(df):
     return score, direction, " | ".join(reasons)
 
 
-def calculate_tp_sl(entry, direction, df):
+def calculate_tp_sl(entry, direction, df, leverage=5):
     """
     Calculate TP and SL based on ATR and BB.
+    SL is capped so it never exceeds liquidation price.
+    At 5x isolated, liq is ~18% from entry — we cap SL at 15% max.
     Returns (tp_price, sl_price, rr_ratio)
     """
     last = df.iloc[-1]
     atr  = float(ta.atr(df["high"], df["low"], df["close"], length=14).iloc[-1])
 
+    # Max SL distance: 80% of distance to liquidation
+    # At isolated margin, liq ≈ 1/leverage from entry (minus fees)
+    # Use 80% of that as absolute max to stay safely above liq
+    max_sl_pct = (1.0 / leverage) * 0.80  # e.g. 5x → 16% max SL distance
+
     if direction == "long":
         sl_price = max(entry - atr * 1.5, last["bb_lower"])
+        # Cap: SL must not go below max allowed distance
+        sl_floor = entry * (1 - max_sl_pct)
+        if sl_price < sl_floor:
+            sl_price = sl_floor
         tp_price = entry + (entry - sl_price) * 2.0  # 2:1 RR minimum
     else:
         sl_price = min(entry + atr * 1.5, last["bb_upper"])
+        # Cap: SL must not go above max allowed distance
+        sl_ceil = entry * (1 + max_sl_pct)
+        if sl_price > sl_ceil:
+            sl_price = sl_ceil
         tp_price = entry - (sl_price - entry) * 2.0
 
-    rr = abs(tp_price - entry) / abs(sl_price - entry)
+    rr = abs(tp_price - entry) / abs(sl_price - entry) if abs(sl_price - entry) > 0 else 0
     return tp_price, sl_price, round(rr, 2)
