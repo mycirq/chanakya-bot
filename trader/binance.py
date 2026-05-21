@@ -166,6 +166,13 @@ def cancel_open_orders(symbol):
         logger.warning(f"Cancel orders failed for {symbol}: {e}")
 
 
+TRADFI_TOKENS = {
+    "NVDA", "AAPL", "TSLA", "COIN", "MSFT", "GOOG", "AMZN", "META",
+    "NFLX", "AMD", "INTC", "PLTR", "MSTR", "SQ", "PYPL", "UBER",
+    "ABNB", "RIVN", "NIO", "BABA", "JD", "PDD",
+}
+
+
 def get_top_futures_pairs(n=30):
     """Get top N USDT-M perpetual pairs by 24h volume."""
     try:
@@ -174,6 +181,7 @@ def get_top_futures_pairs(n=30):
         usdt_perp = {
             k: v for k, v in tickers.items()
             if k.endswith("/USDT:USDT") and v.get("quoteVolume")
+            and k.split("/")[0] not in TRADFI_TOKENS
         }
         sorted_pairs = sorted(usdt_perp.items(),
                               key=lambda x: x[1]["quoteVolume"], reverse=True)

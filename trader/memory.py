@@ -417,6 +417,16 @@ def init_trader_db():
 
 def save_position(symbol, direction, entry_price, tp_price, sl_price,
                   liq_price, margin_usdt, leverage, size, signal_score, signal_reason):
+    # Convert numpy types to native Python (PostgreSQL can't handle np.float64)
+    entry_price = float(entry_price)
+    tp_price = float(tp_price)
+    sl_price = float(sl_price)
+    liq_price = float(liq_price)
+    margin_usdt = float(margin_usdt)
+    leverage = int(leverage)
+    size = float(size)
+    signal_score = int(signal_score)
+
     conn = get_conn()
     if hasattr(conn, 'cursor'):
         cur = conn.cursor()
