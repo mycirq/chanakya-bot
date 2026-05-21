@@ -35,7 +35,7 @@ def get_futures_balance():
                 return float(item.get("availableBalance", 0))
         return 0.0
     except Exception as e:
-        logger.error(f"Balance fetch failed: {e}")
+        logger.error(f"Balance fetch failed: {type(e).__name__}: {e}")
         return 0.0
 
 
@@ -60,7 +60,7 @@ def get_open_positions():
                 })
         return open_pos
     except Exception as e:
-        logger.error(f"Positions fetch failed: {e}")
+        logger.error(f"Positions fetch failed: {type(e).__name__}: {e}")
         return []
 
 
