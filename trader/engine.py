@@ -9,7 +9,11 @@ from trader.binance import (
     fetch_ohlcv, place_order, close_position, cancel_open_orders
 )
 from trader.strategy import compute_indicators, score_signal, calculate_tp_sl
-from trader.risk import can_open_trade, size_position, check_drawdown_alert, get_trading_zone
+from trader.risk import (
+    can_open_trade, size_position, check_drawdown_alert, get_trading_zone,
+    is_at_capacity, should_replace_position, margin_safe_for_new_trade,
+    check_correlation, get_dynamic_max_positions, find_weakest_position
+)
 from trader.memory import (
     save_position, close_position_record, record_memory,
     get_open_positions_db, get_recent_memory, get_trade_stats
@@ -17,7 +21,7 @@ from trader.memory import (
 from trader.reporter import (
     post_pre_trade_thesis, post_trade_opened, post_trade_closed,
     post_drawdown_warning, post_hard_stop, post_daily_summary,
-    post_crypto_scan_result
+    post_crypto_scan_result, post_position_replaced
 )
 from trader.config import MIN_SIGNAL_SCORE, MAX_LEVERAGE, TOP_PAIRS_COUNT
 from db import get_conn
@@ -125,6 +129,7 @@ def run_scan(app):
         post_crypto_scan_result(app.client, all_scores, MIN_SIGNAL_SCORE, zone, skip_reason=allow_reason)
         return
 
+    at_cap, dyn_max = is_at_capacity(open_pos, total_loss)
     post_crypto_scan_result(app.client, all_scores, MIN_SIGNAL_SCORE, zone)
 
     candidates = [
@@ -142,8 +147,27 @@ def run_scan(app):
 
     logger.info(f"Best signal: {symbol} {direction} score={score} — {sig_reason}")
 
+    # ── At capacity? Try replacement ──────────────────────────────────
+    replacing = False
+    replaced_pos = None
+    if at_cap:
+        do_replace, weakest, replace_reason = should_replace_position(score, open_pos)
+        if not do_replace:
+            logger.info(f"At capacity ({len(open_pos)}/{dyn_max}) — {replace_reason}")
+            return
+        logger.info(f"Position replacement: {replace_reason}")
+        replacing = True
+        replaced_pos = weakest
+
+    # ── Correlation check ─────────────────────────────────────────────
+    corr_ok, corr_reason = check_correlation(symbol, direction, open_pos)
+    if not corr_ok:
+        logger.info(f"Correlation blocked: {corr_reason}")
+        return
+
     # Re-check we can still open (race condition guard)
-    allowed, block_reason = can_open_trade(get_open_positions(), balance, total_loss)
+    open_pos = get_open_positions()
+    allowed, block_reason = can_open_trade(open_pos, balance, total_loss)
     if not allowed:
         return
 
@@ -165,6 +189,26 @@ def run_scan(app):
     if margin < 5:
         logger.info(f"Margin too small: ${margin:.2f}, skipping")
         return
+
+    # ── Margin safety check ───────────────────────────────────────────
+    margin_ok, margin_reason = margin_safe_for_new_trade(open_pos, balance, total_loss, margin)
+    if not margin_ok:
+        logger.info(f"Margin guard blocked: {margin_reason}")
+        return
+
+    # ── Execute replacement: close weakest first ──────────────────────
+    if replacing and replaced_pos:
+        old_sym = replaced_pos["symbol"]
+        _, old_pnl_pct = find_weakest_position(open_pos)
+        close_position(old_sym, replaced_pos["side"])
+        cancel_open_orders(old_sym)
+        post_position_replaced(
+            app.client, old_sym, old_pnl_pct,
+            symbol, direction, score, "Stronger signal replaced weaker position"
+        )
+        logger.info(f"Replaced {old_sym} ({old_pnl_pct:+.1f}%) for {symbol}")
+        # Sync the closed position in DB
+        _sync_replaced_position(app, replaced_pos)
 
     # Post thesis BEFORE executing
     post_pre_trade_thesis(
@@ -255,6 +299,40 @@ def _sync_open_positions(app):
                 entry_price, close_price, pnl_usdt, close_reason, duration
             )
             logger.info(f"Position synced closed: {symbol} | PnL: {pnl_usdt:+.2f} USDT")
+
+
+def _sync_replaced_position(app, exchange_pos):
+    """Close the replaced position's DB record immediately."""
+    db_positions = get_open_positions_db()
+    symbol = exchange_pos["symbol"]
+    for pos in db_positions:
+        if pos["symbol"] == symbol:
+            entry_price = float(pos["entry_price"])
+            mark_price = float(exchange_pos.get("mark_price", entry_price))
+            pnl_usdt = (mark_price - entry_price) * float(pos["size"])
+            if pos["direction"] == "short":
+                pnl_usdt = -pnl_usdt
+
+            opened_at = pos.get("opened_at")
+            duration = 0
+            if opened_at:
+                try:
+                    if isinstance(opened_at, str):
+                        opened_at = datetime.fromisoformat(opened_at)
+                    duration = int((datetime.now() - opened_at.replace(tzinfo=None)).total_seconds() / 60)
+                except Exception:
+                    pass
+
+            close_position_record(pos["id"], mark_price, pnl_usdt, "replaced")
+            record_memory(
+                symbol=symbol, direction=pos["direction"],
+                entry_price=entry_price, close_price=mark_price,
+                pnl_usdt=pnl_usdt, signal_score=pos.get("signal_score", 0),
+                signal_reason=pos.get("signal_reason", ""),
+                zone=get_trading_zone(), duration_minutes=duration
+            )
+            logger.info(f"Replaced position synced: {symbol} | PnL: {pnl_usdt:+.2f} USDT")
+            break
 
 
 def _close_all_positions(app):

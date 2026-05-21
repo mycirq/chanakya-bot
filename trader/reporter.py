@@ -141,6 +141,33 @@ def post_trade_closed(client, symbol, direction, entry, close_price,
         logger.error(f"post_trade_closed failed: {e}")
 
 
+def post_position_replaced(client, old_symbol, old_pnl_pct, new_symbol,
+                           new_direction, new_score, reason):
+    cid = _get_channel_id(client)
+    if not cid:
+        return
+    try:
+        client.chat_postMessage(
+            channel=cid,
+            text=f"🔄 Replaced {old_symbol} ({old_pnl_pct:+.1f}%) → {new_symbol} {new_direction} (score={new_score})",
+            blocks=[
+                {"type": "header", "text": {"type": "plain_text",
+                 "text": f"🔄 Position Replaced"}},
+                {"type": "section", "fields": [
+                    {"type": "mrkdwn", "text": f"*Closed:*\n{old_symbol} ({old_pnl_pct:+.1f}%)"},
+                    {"type": "mrkdwn", "text": f"*Opening:*\n{new_symbol} {new_direction}"},
+                    {"type": "mrkdwn", "text": f"*New Score:*\n{new_score}"},
+                    {"type": "mrkdwn", "text": f"*Reason:*\n{reason}"},
+                ]},
+                {"type": "context", "elements": [
+                    {"type": "mrkdwn", "text": "Chanakya Trader • Smart Position Management"}
+                ]}
+            ]
+        )
+    except Exception as e:
+        logger.error(f"post_position_replaced failed: {e}")
+
+
 def post_drawdown_warning(client, loss_usdt):
     cid = _get_channel_id(client)
     if not cid:
