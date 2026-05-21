@@ -208,7 +208,15 @@ def _sync_open_positions(app):
     if not db_positions:
         return
 
-    exchange_open = {p["symbol"] for p in get_open_positions()}
+    exchange_positions = get_open_positions()
+
+    # CRITICAL: if exchange returns empty but we have DB positions,
+    # it's likely a proxy/API failure — do NOT close anything
+    if not exchange_positions and db_positions:
+        logger.warning(f"Exchange returned 0 positions but {len(db_positions)} in DB — skipping sync (possible API failure)")
+        return
+
+    exchange_open = {p["symbol"] for p in exchange_positions}
 
     for pos in db_positions:
         symbol = pos["symbol"]

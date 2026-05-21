@@ -28,40 +28,48 @@ def get_exchange():
 
 def get_futures_balance():
     """Returns available USDT in USDT-M futures wallet via direct fapi endpoint."""
-    try:
-        result = get_exchange().fapiPrivateV2GetBalance()
-        for item in result:
-            if item.get("asset") == "USDT":
-                return float(item.get("availableBalance", 0))
-        return 0.0
-    except Exception as e:
-        logger.error(f"Balance fetch failed: {type(e).__name__}: {e}")
-        return 0.0
+    import time
+    for attempt in range(2):
+        try:
+            result = get_exchange().fapiPrivateV2GetBalance()
+            for item in result:
+                if item.get("asset") == "USDT":
+                    return float(item.get("availableBalance", 0))
+            return 0.0
+        except Exception as e:
+            logger.error(f"Balance fetch failed (attempt {attempt+1}): {type(e).__name__}: {e}")
+            if attempt == 0:
+                time.sleep(3)
+    return 0.0
 
 
 def get_open_positions():
     """Returns list of open USDT-M futures positions."""
-    try:
-        positions = get_exchange().fetch_positions()
-        open_pos = []
-        for p in positions:
-            contracts = abs(float(p.get("contracts") or 0))
-            if contracts > 0:
-                open_pos.append({
-                    "symbol":         p["symbol"],
-                    "side":           p["side"],          # 'long' or 'short'
-                    "size":           contracts,
-                    "entry_price":    float(p["entryPrice"]       or 0),
-                    "mark_price":     float(p["markPrice"]        or 0),
-                    "unrealized_pnl": float(p["unrealizedPnl"]    or 0),
-                    "leverage":       float(p["leverage"]         or MAX_LEVERAGE),
-                    "liq_price":      float(p["liquidationPrice"] or 0),
-                    "margin":         float(p["initialMargin"]    or 0),
-                })
-        return open_pos
-    except Exception as e:
-        logger.error(f"Positions fetch failed: {type(e).__name__}: {e}")
-        return []
+    import time
+    for attempt in range(2):
+        try:
+            positions = get_exchange().fetch_positions()
+            open_pos = []
+            for p in positions:
+                contracts = abs(float(p.get("contracts") or 0))
+                if contracts > 0:
+                    open_pos.append({
+                        "symbol":         p["symbol"],
+                        "side":           p["side"],          # 'long' or 'short'
+                        "size":           contracts,
+                        "entry_price":    float(p["entryPrice"]       or 0),
+                        "mark_price":     float(p["markPrice"]        or 0),
+                        "unrealized_pnl": float(p["unrealizedPnl"]    or 0),
+                        "leverage":       float(p["leverage"]         or MAX_LEVERAGE),
+                        "liq_price":      float(p["liquidationPrice"] or 0),
+                        "margin":         float(p["initialMargin"]    or 0),
+                    })
+            return open_pos
+        except Exception as e:
+            logger.error(f"Positions fetch failed (attempt {attempt+1}): {type(e).__name__}: {e}")
+            if attempt == 0:
+                time.sleep(3)
+    return []
 
 
 def set_leverage(symbol, leverage):
