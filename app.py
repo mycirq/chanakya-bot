@@ -960,6 +960,12 @@ if __name__ == "__main__":
     from trader.kite_engine import get_kite_capital
     from trader.config import MONTHLY_TARGET_PCT, KITE_MONTHLY_TARGET_PCT
     init_trader_db()
+    # One-time migration: insert orphaned BSB position
+    try:
+        from migrations.insert_bsb_position import run as _insert_bsb
+        _insert_bsb()
+    except Exception as _e:
+        logging.warning(f"BSB migration: {_e}")
     # Seed crypto month snapshot
     try:
         if not get_month_snapshot():
