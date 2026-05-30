@@ -18,8 +18,8 @@ _instruments_cache: list | None = None
 
 # Route through Oracle VM SOCKS5 proxy for static IP (Kite requires whitelisted IP)
 KITE_PROXY = {
-    "http":  "socks5h://92.4.80.136:1080",
-    "https": "socks5h://92.4.80.136:1080",
+    "http":  os.environ["PROXY_URL"],
+    "https": os.environ["PROXY_URL"],
 }
 
 

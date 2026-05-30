@@ -19,8 +19,8 @@ def get_exchange():
                 "recvWindow":              10000,
             },
             "proxies": {
-                "http":  "socks5h://92.4.80.136:1080",
-                "https": "socks5h://92.4.80.136:1080",
+                "http":  os.environ["PROXY_URL"],
+                "https": os.environ["PROXY_URL"],
             },
         })
     return _exchange
