@@ -122,12 +122,17 @@ def score_signal(df):
     return score, direction, " | ".join(reasons)
 
 
+# Minimum SL distance from entry — guards against Binance "would trigger immediately"
+# rejection when price has already moved between signal calc and order placement.
+MIN_SL_DISTANCE_PCT = 0.005  # 0.5%
+
+
 def calculate_tp_sl(entry, direction, df, leverage=5):
     """
     Calculate TP and SL based on ATR and BB.
     SL is capped so it never exceeds liquidation price.
     At 5x isolated, liq is ~18% from entry — we cap SL at 15% max.
-    Returns (tp_price, sl_price, rr_ratio)
+    Returns (tp_price, sl_price, rr_ratio) or (None, None, 0) if inputs invalid.
     """
     last = df.iloc[-1]
     atr  = float(ta.atr(df["high"], df["low"], df["close"], length=14).iloc[-1])
@@ -138,19 +143,34 @@ def calculate_tp_sl(entry, direction, df, leverage=5):
     max_sl_pct = (1.0 / leverage) * 0.80  # e.g. 5x → 16% max SL distance
 
     if direction == "long":
-        sl_price = max(entry - atr * 1.5, last["bb_lower"])
-        # Cap: SL must not go below max allowed distance
+        # bb_lower can lag ABOVE entry if 1m price gapped down — clamp so SL
+        # is always strictly below entry. Without this, max() would pick
+        # bb_lower and SL ends up on the wrong side of entry, inverting TP too.
+        bb_anchor = min(float(last["bb_lower"]), entry * (1 - MIN_SL_DISTANCE_PCT))
+        sl_price = max(entry - atr * 1.5, bb_anchor)
         sl_floor = entry * (1 - max_sl_pct)
         if sl_price < sl_floor:
             sl_price = sl_floor
         tp_price = entry + (entry - sl_price) * 2.0  # 2:1 RR minimum
     else:
-        sl_price = min(entry + atr * 1.5, last["bb_upper"])
-        # Cap: SL must not go above max allowed distance
+        # bb_upper can lag BELOW entry if 1m price spiked up — clamp so SL is
+        # always strictly above entry. (See LONG comment above for rationale.)
+        bb_anchor = max(float(last["bb_upper"]), entry * (1 + MIN_SL_DISTANCE_PCT))
+        sl_price = min(entry + atr * 1.5, bb_anchor)
         sl_ceil = entry * (1 + max_sl_pct)
         if sl_price > sl_ceil:
             sl_price = sl_ceil
         tp_price = entry - (sl_price - entry) * 2.0
+
+    # Post-condition: SL on loss side, TP on profit side. If violated, refuse
+    # the trade rather than place an inverted order that Binance will reject
+    # and leave the entry naked.
+    if direction == "long" and not (sl_price < entry < tp_price):
+        logger.error(f"calculate_tp_sl produced inverted LONG: entry={entry} sl={sl_price} tp={tp_price}")
+        return None, None, 0
+    if direction == "short" and not (tp_price < entry < sl_price):
+        logger.error(f"calculate_tp_sl produced inverted SHORT: entry={entry} sl={sl_price} tp={tp_price}")
+        return None, None, 0
 
     rr = abs(tp_price - entry) / abs(sl_price - entry) if abs(sl_price - entry) > 0 else 0
     return tp_price, sl_price, round(rr, 2)

@@ -208,12 +208,12 @@ def start_scheduler(app):
         id="daily_summary"
     )
 
-    # Kite FnO scan: every 5 min (runs only when market is open)
-    scheduler.add_job(
-        lambda: run_kite_scan(app),
-        "interval", minutes=5,
-        id="kite_scan"
-    )
+    # Kite FnO scan DISABLED — migrating from FnO to equity trading
+    # scheduler.add_job(
+    #     lambda: run_kite_scan(app),
+    #     "interval", minutes=5,
+    #     id="kite_scan"
+    # )
 
     # Kite daily summary: 4 PM IST (after market close)
     scheduler.add_job(

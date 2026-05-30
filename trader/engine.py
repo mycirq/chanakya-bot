@@ -119,6 +119,14 @@ def run_scan(app):
             continue
         ohlcv = fetch_ohlcv(symbol, "1h", 220)
         df    = compute_indicators(ohlcv)
+        # Volatility guard — skip pairs where ATR(14)/price > 4%. These move so
+        # fast that SL placement loses the race vs price action (e.g. ESPORTS).
+        if df is not None and len(df) > 0:
+            last = df.iloc[-1]
+            atr_pct = (float(last["high"]) - float(last["low"])) / float(last["close"])
+            if atr_pct > 0.04:
+                logger.info(f"Skipping {symbol}: volatility {atr_pct*100:.1f}% > 4%")
+                continue
         score, direction, sig_reason = score_signal(df)
         all_scores.append((score, symbol, direction, sig_reason))
         if df is not None:
@@ -179,6 +187,9 @@ def run_scan(app):
 
     # Calculate TP / SL
     tp_price, sl_price, rr = calculate_tp_sl(entry_price, direction, df, MAX_LEVERAGE)
+    if tp_price is None or sl_price is None:
+        logger.info(f"TP/SL inverted for {symbol}, skipping")
+        return
     if rr < 1.5:
         logger.info(f"RR {rr} below minimum for {symbol}, skipping")
         return
@@ -216,25 +227,33 @@ def run_scan(app):
         tp_price, sl_price, margin, MAX_LEVERAGE, score, sig_reason, rr
     )
 
-    # Place order
-    order = place_order(symbol, direction, margin, entry_price,
-                        tp_price, sl_price, MAX_LEVERAGE)
-    if not order:
+    # Place order (atomic: entry + SL both confirmed, or fully rolled back)
+    result = place_order(symbol, direction, margin, entry_price,
+                         tp_price, sl_price, MAX_LEVERAGE)
+    if not result:
         return
 
-    # Estimate liquidation price (isolated, 5x)
-    liq_buffer = entry_price * 0.20  # ~20% from entry at 5x isolated
-    liq_price  = (entry_price - liq_buffer) if direction == "long" else (entry_price + liq_buffer)
-
-    # Save to DB
-    pos_id = save_position(
-        symbol=symbol, direction=direction,
-        entry_price=entry_price, tp_price=tp_price,
-        sl_price=sl_price, liq_price=liq_price,
-        margin_usdt=margin, leverage=MAX_LEVERAGE,
-        size=margin * MAX_LEVERAGE / entry_price,
-        signal_score=score, signal_reason=sig_reason
+    # Prefer Binance's actual liq price; fall back to rough estimate if unavailable
+    liq_price = result.get("real_liq_price") or (
+        entry_price * 0.80 if direction == "long" else entry_price * 1.20
     )
+
+    # Save to DB. If this throws, the position is on Binance with SL set — safe
+    # but invisible to the bot. Market-close to keep DB and exchange in sync.
+    try:
+        pos_id = save_position(
+            symbol=symbol, direction=direction,
+            entry_price=entry_price, tp_price=tp_price,
+            sl_price=sl_price, liq_price=liq_price,
+            margin_usdt=margin, leverage=MAX_LEVERAGE,
+            size=margin * MAX_LEVERAGE / entry_price,
+            signal_score=score, signal_reason=sig_reason
+        )
+    except Exception as e:
+        logger.error(f"save_position failed for {symbol}: {type(e).__name__}: {e} — market-closing to avoid orphan")
+        from trader.binance import _rollback_position
+        _rollback_position(symbol, direction)
+        return
 
     # Report to Slack
     post_trade_opened(
