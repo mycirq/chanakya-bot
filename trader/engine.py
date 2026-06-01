@@ -6,7 +6,8 @@ from datetime import datetime
 
 from trader.binance import (
     get_futures_balance, get_open_positions, get_top_futures_pairs,
-    fetch_ohlcv, place_order, close_position, cancel_open_orders
+    fetch_ohlcv, place_order, close_position, cancel_open_orders,
+    get_realized_pnl_since
 )
 from trader.strategy import compute_indicators, score_signal, calculate_tp_sl
 from trader.risk import (
@@ -271,12 +272,11 @@ def _sync_open_positions(app):
     if not db_positions:
         return
 
-    exchange_positions = get_open_positions()
-
-    # CRITICAL: if exchange returns empty but we have DB positions,
-    # it's likely a proxy/API failure — do NOT close anything
-    if not exchange_positions and db_positions:
-        logger.warning(f"Exchange returned 0 positions but {len(db_positions)} in DB — skipping sync (possible API failure)")
+    # strict=True → None on API/proxy failure, [] only on a genuinely-flat account.
+    # This lets us reconcile a real close without falsely closing on a fetch error.
+    exchange_positions = get_open_positions(strict=True)
+    if exchange_positions is None:
+        logger.warning(f"Exchange positions fetch failed — skipping sync ({len(db_positions)} in DB, will retry next scan)")
         return
 
     exchange_open = {p["symbol"] for p in exchange_positions}
@@ -284,24 +284,32 @@ def _sync_open_positions(app):
     for pos in db_positions:
         symbol = pos["symbol"]
         if symbol not in exchange_open:
-            # Position closed on exchange (TP or SL hit)
-            ohlcv = fetch_ohlcv(symbol, "1m", 2)
-            close_price = float(ohlcv[-1][4]) if ohlcv else float(pos["entry_price"])
+            # Position closed on exchange (TP or SL hit).
             entry_price = float(pos["entry_price"])
-
-            pnl_usdt = (close_price - entry_price) * float(pos["size"])
-            if pos["direction"] == "short":
-                pnl_usdt = -pnl_usdt
 
             opened_at = pos.get("opened_at")
             duration = 0
+            opened_dt = None
             if opened_at:
                 try:
                     if isinstance(opened_at, str):
                         opened_at = datetime.fromisoformat(opened_at)
-                    duration = int((datetime.now() - opened_at.replace(tzinfo=None)).total_seconds() / 60)
+                    opened_dt = opened_at.replace(tzinfo=None)
+                    duration = int((datetime.now() - opened_dt).total_seconds() / 60)
                 except Exception:
                     duration = 0
+
+            # Use Binance's authoritative realized P&L for this position rather than
+            # estimating from a candle (which fabricated huge phantom losses before).
+            since_ms = int((opened_dt.timestamp() - 300) * 1000) if opened_dt else 0
+            pnl_usdt = get_realized_pnl_since(symbol, since_ms) if since_ms else None
+            if pnl_usdt is None:
+                logger.warning(f"Realized P&L unavailable for {symbol} — leaving open, will retry next scan")
+                continue
+
+            # Close price is for display only; best-effort from the latest candle.
+            ohlcv = fetch_ohlcv(symbol, "1m", 2)
+            close_price = float(ohlcv[-1][4]) if ohlcv else entry_price
 
             close_reason = "tp_hit" if pnl_usdt > 0 else "sl_hit"
 

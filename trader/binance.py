@@ -94,8 +94,12 @@ def get_futures_balance():
     return 0.0
 
 
-def get_open_positions():
-    """Returns list of open USDT-M futures positions."""
+def get_open_positions(strict=False):
+    """Returns list of open USDT-M futures positions.
+
+    When strict=True, returns None if the fetch fails (so callers can tell a
+    genuinely-flat account, which returns [], apart from an API/proxy failure).
+    """
     last_err = None
     for attempt in range(2):
         try:
@@ -123,7 +127,36 @@ def get_open_positions():
             if attempt == 0:
                 time.sleep(3)
     _track_api_failure("get_open_positions", type(last_err).__name__ if last_err else "unknown")
-    return []
+    return None if strict else []
+
+
+def get_realized_pnl_since(symbol, since_ms):
+    """Sum of REALIZED_PNL income for `symbol` since `since_ms` (epoch ms).
+
+    This is Binance's authoritative realized P&L for the position — used when
+    reconciling a closed position so we record the true fill result instead of
+    estimating from a candle price. Returns None on failure (caller should retry).
+    """
+    try:
+        ex = get_exchange()
+        market_id = ex.market(symbol)["id"]  # e.g. 'BTCUSDT'
+        total = 0.0
+        cur = int(since_ms)
+        while True:
+            batch = ex.fapiPrivateGetIncome({
+                "incomeType": "REALIZED_PNL", "symbol": market_id,
+                "startTime": cur, "limit": 1000,
+            })
+            if not batch:
+                break
+            total += sum(float(i["income"]) for i in batch)
+            if len(batch) < 1000:
+                break
+            cur = int(batch[-1]["time"]) + 1
+        return total
+    except Exception as e:
+        logger.warning(f"Realized PnL fetch failed for {symbol}: {type(e).__name__}: {e}")
+        return None
 
 
 def set_leverage(symbol, leverage):
