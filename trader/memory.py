@@ -232,6 +232,66 @@ def init_trader_db():
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """)
+        # ── Kite Equity Intraday tables (third vertical) ──────────────────────
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS equity_config (
+                key VARCHAR(50) PRIMARY KEY,
+                value TEXT,
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS equity_watchlist (
+                id SERIAL PRIMARY KEY,
+                trade_date DATE NOT NULL,
+                symbol VARCHAR(50) NOT NULL,
+                bias VARCHAR(10),
+                score INTEGER,
+                thesis TEXT,
+                sources TEXT,
+                created_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE (trade_date, symbol)
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS equity_positions (
+                id SERIAL PRIMARY KEY,
+                symbol VARCHAR(50) NOT NULL,
+                direction VARCHAR(10) NOT NULL,
+                entry_price DECIMAL(12,2),
+                sl_price DECIMAL(12,2),
+                tp_price DECIMAL(12,2),
+                quantity INTEGER,
+                risk_inr DECIMAL(12,2),
+                entry_order_id VARCHAR(40),
+                sl_order_id VARCHAR(40),
+                signal_score INTEGER,
+                signal_reason TEXT,
+                status VARCHAR(20) DEFAULT 'open',
+                opened_at TIMESTAMP DEFAULT NOW(),
+                closed_at TIMESTAMP,
+                close_price DECIMAL(12,2),
+                pnl_inr DECIMAL(12,2),
+                close_reason VARCHAR(50)
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS equity_memory (
+                id SERIAL PRIMARY KEY,
+                symbol VARCHAR(50),
+                direction VARCHAR(10),
+                entry_price DECIMAL(12,2),
+                close_price DECIMAL(12,2),
+                pnl_inr DECIMAL(12,2),
+                pnl_pct DECIMAL(10,4),
+                quantity INTEGER,
+                signal_score INTEGER,
+                signal_reason TEXT,
+                duration_minutes INTEGER,
+                outcome VARCHAR(20),
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
         # Kite FnO tables
         cur.execute("""
             CREATE TABLE IF NOT EXISTS kite_config (
@@ -351,6 +411,66 @@ def init_trader_db():
                 month TEXT NOT NULL UNIQUE,
                 start_balance REAL,
                 target_pct REAL,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        # ── Kite Equity Intraday tables (third vertical) ──────────────────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS equity_config (
+                key TEXT PRIMARY KEY,
+                value TEXT,
+                updated_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS equity_watchlist (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trade_date TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                bias TEXT,
+                score INTEGER,
+                thesis TEXT,
+                sources TEXT,
+                created_at TEXT DEFAULT (datetime('now')),
+                UNIQUE (trade_date, symbol)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS equity_positions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                direction TEXT NOT NULL,
+                entry_price REAL,
+                sl_price REAL,
+                tp_price REAL,
+                quantity INTEGER,
+                risk_inr REAL,
+                entry_order_id TEXT,
+                sl_order_id TEXT,
+                signal_score INTEGER,
+                signal_reason TEXT,
+                status TEXT DEFAULT 'open',
+                opened_at TEXT DEFAULT (datetime('now')),
+                closed_at TEXT,
+                close_price REAL,
+                pnl_inr REAL,
+                close_reason TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS equity_memory (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT,
+                direction TEXT,
+                entry_price REAL,
+                close_price REAL,
+                pnl_inr REAL,
+                pnl_pct REAL,
+                quantity INTEGER,
+                signal_score INTEGER,
+                signal_reason TEXT,
+                duration_minutes INTEGER,
+                outcome TEXT,
                 created_at TEXT DEFAULT (datetime('now'))
             )
         """)

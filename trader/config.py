@@ -72,9 +72,30 @@ KITE_INDICES = {
     },
 }
 
+# ── Kite Equity Intraday (third vertical) ──────────────────────────────────────
+# Independent of crypto and Kite FnO. Watchlist-driven MIS intraday with a
+# mandatory exchange-side SL-M stop on every entry. HALF-SIZE observation period
+# for the first 2 weeks; scale up only after a positive trajectory.
+EQUITY_CAPITAL_INR        = 100000.0  # shares the ₹1L Kite capital (FnO parked)
+EQUITY_RISK_PER_TRADE_INR = 750.0     # half-size: max ₹ risked per trade (entry→SL)
+EQUITY_MAX_POSITIONS      = 3          # max concurrent intraday positions
+EQUITY_DAILY_LOSS_INR     = 2000.0    # half-size daily-loss circuit (−2%) → halt for the day
+EQUITY_MIN_SIGNAL_SCORE   = 60         # technical confirmation threshold on watchlist names
+EQUITY_SCAN_INTERVAL_MIN  = 5          # scan every 5 min during market hours
+EQUITY_MAX_SL_PCT         = 0.02       # cap SL distance at 2% of price (sizing guard)
+EQUITY_WATCHLIST_SIZE     = 10         # research engine picks up to N names
+EQUITY_MIS_LEVERAGE       = 5          # approx MIS buying-power multiple (margin guard)
+EQUITY_HALF_SIZE          = True       # observation period flag (first 2 weeks)
+
+# Hard square-off 3:15 PM IST — we exit before Zerodha's 3:20 auto-square.
+EQUITY_SQUAREOFF   = (15, 15)
+EQUITY_MARKET_OPEN = (9, 15)
+EQUITY_NO_NEW_AFTER = (15, 0)          # stop opening new trades after 3:00 PM
+
 # ── Slack channels ─────────────────────────────────────────────────────────────
 CRYPTO_TRADES_CHANNEL = "crypto-trades"
 KITE_TRADES_CHANNEL   = "dalal-trades"
+EQUITY_TRADES_CHANNEL = "dalal-trades"   # reuse existing channel for equity too
 
 # ── Indicator params ───────────────────────────────────────────────────────────
 RSI_PERIOD         = 14

@@ -8,6 +8,10 @@ from prices import get_price
 from news import fetch_news
 from trader.engine import run_scan, run_daily_summary
 from trader.kite_engine import run_kite_scan, run_kite_daily_summary
+from trader.equity_engine import (
+    run_equity_scan, run_equity_squareoff, run_equity_daily_summary
+)
+from trader.equity_research import run_research
 from trader.memory import (
     init_month_snapshot, get_month_snapshot, get_trade_stats,
     init_kite_month_snapshot, get_kite_month_snapshot, get_kite_trade_stats
@@ -241,6 +245,32 @@ def start_scheduler(app):
         lambda: _run_kite_month_end_summary(app),
         CronTrigger(hour=21, minute=0, timezone=IST),
         id="kite_month_end"
+    )
+
+    # ── Kite Equity Intraday (third vertical) ─────────────────────────────────
+    # Overnight research → tomorrow's watchlist, posted ~5:30 PM IST after close.
+    scheduler.add_job(
+        lambda: run_research(app),
+        CronTrigger(hour=17, minute=30, day_of_week="mon-fri", timezone=IST),
+        id="equity_research"
+    )
+    # Market-hours scan every 5 min (self-gates to 9:15–15:15 IST inside).
+    scheduler.add_job(
+        lambda: run_equity_scan(app),
+        "interval", minutes=5,
+        id="equity_scan"
+    )
+    # Hard square-off 3:15 PM IST (before Zerodha's 3:20 auto-square).
+    scheduler.add_job(
+        lambda: run_equity_squareoff(app),
+        CronTrigger(hour=15, minute=15, day_of_week="mon-fri", timezone=IST),
+        id="equity_squareoff"
+    )
+    # Equity daily summary 3:45 PM IST.
+    scheduler.add_job(
+        lambda: run_equity_daily_summary(app),
+        CronTrigger(hour=15, minute=45, day_of_week="mon-fri", timezone=IST),
+        id="equity_daily_summary"
     )
 
     # Month start (1st of each month, 6 AM IST): snapshot starting balance

@@ -715,26 +715,68 @@ def handle_trade_active(ack, command, client):
 
     if market in ("kite", "fno", "dalal"):
         _show_kite_active(client, channel_id, user_id)
+    elif market in ("equity", "eq", "intraday", "stocks"):
+        _show_equity_active(client, channel_id, user_id)
     else:
         _show_crypto_active(client, channel_id, user_id)
+
+
+def _show_equity_active(client, channel_id, user_id):
+    from datetime import datetime
+    from trader.config import IST, EQUITY_DAILY_LOSS_INR
+    from trader.equity_kite import get_equity_positions, get_equity_capital
+    from trader.equity_engine import is_equity_paused, get_equity_day_pnl
+    from trader.equity_research import get_watchlist
+    positions = get_equity_positions()
+    capital   = get_equity_capital()
+    day_pnl   = get_equity_day_pnl()
+    status    = "🔴 PAUSED" if is_equity_paused() else "🟢 ACTIVE"
+    watch     = get_watchlist(datetime.now(IST).date())
+    wl = ", ".join(f"{w['symbol']}({w['bias'][:1]})" for w in watch) or "none"
+    head = (f"Equity Intraday {status} | Capital: ₹{capital:,.0f} | "
+            f"Day P&L: ₹{day_pnl:+,.0f} (circuit ₹{EQUITY_DAILY_LOSS_INR:,.0f})\n"
+            f"Today's watchlist: {wl}")
+    if not positions:
+        _post_reply(client, channel_id, user_id, head + "\nNo open positions.")
+        return
+    blocks = [
+        {"type": "header", "text": {"type": "plain_text", "text": f"⚡ Equity Intraday {status}"}},
+        {"type": "section", "text": {"type": "mrkdwn", "text": head}},
+        {"type": "divider"},
+    ]
+    for p in positions:
+        trend = "🟢" if p["pnl"] >= 0 else "🔴"
+        blocks.append({"type": "section", "fields": [
+            {"type": "mrkdwn", "text": f"*{trend} {p['symbol']}*\nqty {p['quantity']}"},
+            {"type": "mrkdwn", "text": f"*Avg:* ₹{p['average_price']:.2f}\n*LTP:* ₹{p['last_price']:.2f}"},
+            {"type": "mrkdwn", "text": f"*P&L:*\n₹{p['pnl']:+,.0f}"},
+        ]})
+        blocks.append({"type": "divider"})
+    _post_reply(client, channel_id, user_id, "Equity positions", blocks=blocks)
 
 
 def _show_crypto_active(client, channel_id, user_id):
     from trader.binance import get_open_positions, get_futures_balance
     from trader.engine import is_paused, get_total_loss_usdt
+    from trader.memory import get_month_snapshot
     positions  = get_open_positions()
     balance    = get_futures_balance()
-    total_loss = get_total_loss_usdt()
+    total_loss = get_total_loss_usdt()   # current drawdown from month start (0 if up)
+    snap       = get_month_snapshot()
+    baseline   = float(snap["start_balance"]) if snap and snap.get("start_balance") else balance
+    net_pnl    = balance - baseline      # month-to-date P&L
     status     = "🔴 PAUSED" if is_paused() else "🟢 ACTIVE"
     if not positions:
         _post_reply(client, channel_id, user_id,
-                    f"Crypto {status} | Balance: ${balance:.2f} USDT | Loss: ${total_loss:.2f} USDT\nNo open positions.")
+                    f"Crypto {status} | Balance: ${balance:.2f} USDT | "
+                    f"MTD P&L: ${net_pnl:+.2f} | Drawdown: ${total_loss:.2f}\nNo open positions.")
         return
     blocks = [
         {"type": "header", "text": {"type": "plain_text", "text": f"⚡ Crypto Positions {status}"}},
         {"type": "section", "fields": [
             {"type": "mrkdwn", "text": f"*Wallet:*\n${balance:.2f} USDT"},
-            {"type": "mrkdwn", "text": f"*Total Loss:*\n${total_loss:.2f} USDT"},
+            {"type": "mrkdwn", "text": f"*MTD P&L:*\n${net_pnl:+.2f} USDT"},
+            {"type": "mrkdwn", "text": f"*Drawdown:*\n${total_loss:.2f} USDT"},
         ]}, {"type": "divider"},
     ]
     for p in positions:
@@ -794,8 +836,11 @@ def handle_trade_pause(ack, command, client):
     if market in ("kite", "fno", "dalal", "both"):
         from trader.kite_engine import pause_kite; pause_kite()
         msgs.append("🔴 Kite FnO paused")
+    if market in ("equity", "eq", "intraday", "stocks", "both"):
+        from trader.equity_engine import pause_equity; pause_equity()
+        msgs.append("🔴 Equity intraday paused")
     if not msgs:
-        msgs.append("Usage: `/trade-pause crypto` | `kite` | `both`")
+        msgs.append("Usage: `/trade-pause crypto` | `kite` | `equity` | `both`")
     _post_reply(client, command["channel_id"], command["user_id"], " | ".join(msgs))
 
 
@@ -811,8 +856,11 @@ def handle_trade_resume(ack, command, client):
     if market in ("kite", "fno", "dalal", "both"):
         from trader.kite_engine import resume_kite; resume_kite()
         msgs.append("🟢 Kite FnO resumed")
+    if market in ("equity", "eq", "intraday", "stocks", "both"):
+        from trader.equity_engine import resume_equity; resume_equity()
+        msgs.append("🟢 Equity intraday resumed")
     if not msgs:
-        msgs.append("Usage: `/trade-resume crypto` | `kite` | `both`")
+        msgs.append("Usage: `/trade-resume crypto` | `kite` | `equity` | `both`")
     _post_reply(client, command["channel_id"], command["user_id"], " | ".join(msgs))
 
 
