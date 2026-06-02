@@ -24,7 +24,7 @@ from trader.reporter import (
     post_drawdown_warning, post_hard_stop, post_daily_summary,
     post_crypto_scan_result, post_position_replaced
 )
-from trader.config import MIN_SIGNAL_SCORE, MAX_LEVERAGE, TOP_PAIRS_COUNT
+from trader.config import MIN_SIGNAL_SCORE, MAX_LEVERAGE, TOP_PAIRS_COUNT, CAPITAL_USDT
 from db import get_conn
 
 logger = logging.getLogger(__name__)
@@ -49,24 +49,27 @@ def resume_trading():
 
 
 def get_total_loss_usdt():
-    """Sum of all realized losses + current unrealized losses."""
+    """Current drawdown from this month's starting balance (0 if at/above it).
+
+    This is the figure the hard-stop and margin guard use, so it must reflect real
+    equity drawdown — NOT a running sum of lifetime losing trades. Summing all-time
+    losses ignored wins, grew without bound, and throttled a profitable account
+    (it read $224 while the wallet was up +$136). Drawdown-from-baseline self-heals:
+    when the account is at or above its month-start balance, drawdown is 0.
+
+    Falls back to configured starting capital if no month snapshot exists, and to 0
+    if the balance can't be fetched (an API blip must not trigger a false freeze).
+    """
     try:
-        open_pos = get_open_positions()
-        unrealized = sum(p["unrealized_pnl"] for p in open_pos if p["unrealized_pnl"] < 0)
-        conn = get_conn()
-        if hasattr(conn, 'cursor'):
-            from psycopg2.extras import RealDictCursor
-            cur = conn.cursor(cursor_factory=RealDictCursor)
-            cur.execute("SELECT COALESCE(SUM(pnl_usdt), 0) as total FROM trade_memory WHERE outcome='loss'")
-            realized = float(cur.fetchone()["total"])
-            cur.close()
-        else:
-            row = conn.execute(
-                "SELECT COALESCE(SUM(pnl_usdt), 0) as total FROM trade_memory WHERE outcome='loss'"
-            ).fetchone()
-            realized = float(row["total"]) if row else 0
-        conn.close()
-        return abs(min(realized + unrealized, 0))
+        balance = get_futures_balance()
+        if not balance or balance <= 0:
+            return 0.0
+        from trader.memory import get_month_snapshot
+        snap = get_month_snapshot()
+        baseline = float(snap["start_balance"]) if snap and snap.get("start_balance") else CAPITAL_USDT
+        if baseline <= 0:
+            baseline = CAPITAL_USDT
+        return max(0.0, baseline - balance)
     except Exception as e:
         logger.error(f"get_total_loss_usdt failed: {e}")
         return 0.0
