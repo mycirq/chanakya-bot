@@ -32,12 +32,13 @@ def evaluate_equity(symbol: str, bias: str | None = None) -> dict | None:
         return None
 
     score, direction, reason = score_signal(df)
+    logger.info(f"equity {symbol}: score={score} dir={direction} bias={bias} (need {EQUITY_MIN_SIGNAL_SCORE})")
     if not direction or score < EQUITY_MIN_SIGNAL_SCORE:
         return None
 
-    if bias in ("long", "short") and direction != bias:
-        logger.info(f"{symbol}: {direction} signal contradicts watchlist bias {bias} — skip")
-        return None
+    # Bias gate removed (user choice 2026-06-03): the watchlist selects WHICH stocks
+    # are in play; we trade whichever direction the intraday technicals point, even
+    # if that opposes the news bias. `bias` is kept for logging/context only.
 
     last = df.iloc[-1]
     # Prefer a live LTP for the entry reference; fall back to last 5-min close.
