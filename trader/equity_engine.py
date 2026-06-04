@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 _equity_paused = False
 _circuit_tripped_date = None   # date the daily circuit halted trading
+_attempted = {}                # {date: set(symbols)} — one order attempt per name per day
 
 
 def is_equity_paused(): return _equity_paused
@@ -279,12 +280,13 @@ def run_equity_scan(app):
 
     held = {p["symbol"] for p in db_open}
     traded = _symbols_traded_today()
+    attempted = _attempted.setdefault(_today(), set())
     capital = get_equity_capital()
 
     candidates = []
     for w in watch:
         sym = w["symbol"]
-        if sym in held or sym in traded:
+        if sym in held or sym in traded or sym in attempted:
             continue
         plan = evaluate_equity(sym, bias=w.get("bias"))
         if plan:
@@ -306,11 +308,14 @@ def run_equity_scan(app):
 
 
 def _open_trade(app, plan):
-    post_equity_thesis(app.client, plan)
     if _dry_run():
         logger.info(f"[DRY_RUN] would open {plan['symbol']} {plan['direction']} "
                     f"qty={plan['quantity']} entry~{plan['entry']} SL={plan['sl']}")
         return
+    # Mark attempted BEFORE placing — one shot per name per day, so a rejected order
+    # can never retry every 5 min and bleed round-trip costs (the Jun-4 ₹554 lesson).
+    _attempted.setdefault(_today(), set()).add(plan["symbol"])
+    post_equity_thesis(app.client, plan)
     result = place_equity_order(plan["symbol"], plan["direction"], plan["quantity"], plan["sl"])
     if not result:
         logger.warning(f"Equity order failed for {plan['symbol']} — not saving")

@@ -30,7 +30,9 @@ def get_kite() -> KiteConnect:
     global _kite
     if _kite is None:
         _kite = KiteConnect(api_key=os.environ["KITE_API_KEY"])
-        _kite.reqsession.proxies.update(KITE_PROXY)
+    # Always (re)apply the proxy — auto_login() may have created _kite without it,
+    # and order placement REQUIRES the whitelisted static IP the proxy provides.
+    _kite.reqsession.proxies.update(KITE_PROXY)
     token = _get_stored_token()
     if token:
         _kite.set_access_token(token)

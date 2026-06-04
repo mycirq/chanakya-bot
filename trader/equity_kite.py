@@ -18,24 +18,32 @@ logger = logging.getLogger(__name__)
 
 _equity_instruments = None   # cache of NSE instrument dicts
 _token_by_symbol = None      # {tradingsymbol: instrument_token}
+_tick_by_symbol = None       # {tradingsymbol: tick_size}  (NSE varies: 0.05 / 0.50 / ...)
 
 # Zerodha rejects plain MARKET orders via API ("market protection" error), so we
 # place marketable LIMIT orders: priced through the touch by this buffer they fill
 # immediately at the best available price, within a protective band.
 ENTRY_BAND = 0.005   # 0.5% through for entries
 EXIT_BAND  = 0.015   # 1.5% through for exits/rollback (ensure fill)
-TICK = 0.05          # NSE tick size for most stocks
+DEFAULT_TICK = 0.05
 
 
-def _round_tick(price: float) -> float:
-    return round(round(float(price) / TICK) * TICK, 2)
+def _tick(symbol: str) -> float:
+    if _tick_by_symbol is None:
+        get_equity_instruments()
+    return (_tick_by_symbol or {}).get(symbol.upper(), DEFAULT_TICK) or DEFAULT_TICK
+
+
+def _round_tick(symbol: str, price: float) -> float:
+    t = _tick(symbol)
+    return round(round(float(price) / t) * t, 2)
 
 
 # ── Instruments ──────────────────────────────────────────────────────────────
 
 def get_equity_instruments() -> list:
     """Download + cache NSE cash-segment instruments (EQ series only)."""
-    global _equity_instruments, _token_by_symbol
+    global _equity_instruments, _token_by_symbol, _tick_by_symbol
     if _equity_instruments is None:
         try:
             all_nse = get_kite().instruments("NSE")
@@ -45,6 +53,8 @@ def get_equity_instruments() -> list:
             ]
             _token_by_symbol = {i["tradingsymbol"]: i["instrument_token"]
                                 for i in _equity_instruments}
+            _tick_by_symbol = {i["tradingsymbol"]: float(i.get("tick_size") or DEFAULT_TICK)
+                               for i in _equity_instruments}
             logger.info(f"Loaded {len(_equity_instruments)} NSE equity instruments")
         except Exception as e:
             logger.error(f"get_equity_instruments failed: {e}")
@@ -163,7 +173,7 @@ def place_equity_order(symbol, direction, quantity, sl_price):
         logger.error(f"No LTP for {sym} — cannot price marketable limit entry")
         return None
     # Marketable LIMIT: buy slightly above / sell slightly below the touch.
-    entry_limit = _round_tick(ltp * (1 + ENTRY_BAND) if direction == "long"
+    entry_limit = _round_tick(sym, ltp * (1 + ENTRY_BAND) if direction == "long"
                               else ltp * (1 - ENTRY_BAND))
 
     # 1) Entry — MIS marketable LIMIT (plain MARKET is blocked by the Kite API)
@@ -185,18 +195,23 @@ def place_equity_order(symbol, direction, quantity, sl_price):
         cancel_order(entry_id)
         return None
 
-    # 2) Protective stop — SL-M on the opposite side, MIS, trigger at sl_price.
-    sl_trigger = _round_tick(sl_price)
+    # 2) Protective stop — stop-LIMIT (SL) on the opposite side, MIS. SL-M is also
+    #    rejected by the API as a market order, so we use SL with the limit set
+    #    through the trigger (it fills like a market stop on liquid names).
+    sl_trigger = _round_tick(sym, sl_price)
+    sl_limit = _round_tick(sym, sl_trigger * (1 - EXIT_BAND)) if exit_side == kite.TRANSACTION_TYPE_SELL \
+        else _round_tick(sym, sl_trigger * (1 + EXIT_BAND))
     try:
         sl_id = kite.place_order(
             kite.VARIETY_REGULAR,
             tradingsymbol=sym, exchange=kite.EXCHANGE_NSE,
             transaction_type=exit_side, quantity=int(quantity),
-            order_type=kite.ORDER_TYPE_SLM, product=kite.PRODUCT_MIS,
-            trigger_price=sl_trigger, validity=kite.VALIDITY_DAY,
+            order_type=kite.ORDER_TYPE_SL, price=sl_limit,
+            trigger_price=sl_trigger, product=kite.PRODUCT_MIS,
+            validity=kite.VALIDITY_DAY,
         )
     except Exception as e:
-        logger.error(f"SL-M placement failed for {sym}: {type(e).__name__}: {e} — rolling back entry")
+        logger.error(f"SL placement failed for {sym}: {type(e).__name__}: {e} — rolling back entry")
         _market_exit(sym, exit_side, quantity)
         return None
 
@@ -213,8 +228,8 @@ def _exit_limit(sym, exit_side):
         return None
     # Exiting via BUY → price up through; via SELL → price down through.
     if exit_side == kite.TRANSACTION_TYPE_BUY:
-        return _round_tick(ltp * (1 + EXIT_BAND))
-    return _round_tick(ltp * (1 - EXIT_BAND))
+        return _round_tick(sym, ltp * (1 + EXIT_BAND))
+    return _round_tick(sym, ltp * (1 - EXIT_BAND))
 
 
 def _market_exit(sym, exit_side, quantity):
