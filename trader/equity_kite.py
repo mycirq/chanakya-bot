@@ -19,6 +19,17 @@ logger = logging.getLogger(__name__)
 _equity_instruments = None   # cache of NSE instrument dicts
 _token_by_symbol = None      # {tradingsymbol: instrument_token}
 
+# Zerodha rejects plain MARKET orders via API ("market protection" error), so we
+# place marketable LIMIT orders: priced through the touch by this buffer they fill
+# immediately at the best available price, within a protective band.
+ENTRY_BAND = 0.005   # 0.5% through for entries
+EXIT_BAND  = 0.015   # 1.5% through for exits/rollback (ensure fill)
+TICK = 0.05          # NSE tick size for most stocks
+
+
+def _round_tick(price: float) -> float:
+    return round(round(float(price) / TICK) * TICK, 2)
+
 
 # ── Instruments ──────────────────────────────────────────────────────────────
 
@@ -147,14 +158,22 @@ def place_equity_order(symbol, direction, quantity, sl_price):
     entry_side = kite.TRANSACTION_TYPE_BUY if direction == "long" else kite.TRANSACTION_TYPE_SELL
     exit_side  = kite.TRANSACTION_TYPE_SELL if direction == "long" else kite.TRANSACTION_TYPE_BUY
 
-    # 1) Entry — MIS market
+    ltp = get_equity_ltp([sym]).get(sym)
+    if not ltp:
+        logger.error(f"No LTP for {sym} — cannot price marketable limit entry")
+        return None
+    # Marketable LIMIT: buy slightly above / sell slightly below the touch.
+    entry_limit = _round_tick(ltp * (1 + ENTRY_BAND) if direction == "long"
+                              else ltp * (1 - ENTRY_BAND))
+
+    # 1) Entry — MIS marketable LIMIT (plain MARKET is blocked by the Kite API)
     try:
         entry_id = kite.place_order(
             kite.VARIETY_REGULAR,
             tradingsymbol=sym, exchange=kite.EXCHANGE_NSE,
             transaction_type=entry_side, quantity=int(quantity),
-            order_type=kite.ORDER_TYPE_MARKET, product=kite.PRODUCT_MIS,
-            validity=kite.VALIDITY_DAY,
+            order_type=kite.ORDER_TYPE_LIMIT, price=entry_limit,
+            product=kite.PRODUCT_MIS, validity=kite.VALIDITY_DAY,
         )
     except Exception as e:
         logger.error(f"Entry order failed for {sym}: {type(e).__name__}: {e}")
@@ -167,7 +186,7 @@ def place_equity_order(symbol, direction, quantity, sl_price):
         return None
 
     # 2) Protective stop — SL-M on the opposite side, MIS, trigger at sl_price.
-    sl_trigger = round(float(sl_price), 2)
+    sl_trigger = _round_tick(sl_price)
     try:
         sl_id = kite.place_order(
             kite.VARIETY_REGULAR,
@@ -186,16 +205,30 @@ def place_equity_order(symbol, direction, quantity, sl_price):
     return {"entry_order_id": entry_id, "sl_order_id": sl_id, "fill_price": fill}
 
 
+def _exit_limit(sym, exit_side):
+    """Marketable LIMIT price that fills like a market exit, within EXIT_BAND."""
+    kite = get_kite()
+    ltp = get_equity_ltp([sym]).get(sym)
+    if not ltp:
+        return None
+    # Exiting via BUY → price up through; via SELL → price down through.
+    if exit_side == kite.TRANSACTION_TYPE_BUY:
+        return _round_tick(ltp * (1 + EXIT_BAND))
+    return _round_tick(ltp * (1 - EXIT_BAND))
+
+
 def _market_exit(sym, exit_side, quantity):
+    kite = get_kite()
+    price = _exit_limit(sym, exit_side)
     try:
-        get_kite().place_order(
-            get_kite().VARIETY_REGULAR,
-            tradingsymbol=sym, exchange=get_kite().EXCHANGE_NSE,
+        kite.place_order(
+            kite.VARIETY_REGULAR,
+            tradingsymbol=sym, exchange=kite.EXCHANGE_NSE,
             transaction_type=exit_side, quantity=int(quantity),
-            order_type=get_kite().ORDER_TYPE_MARKET, product=get_kite().PRODUCT_MIS,
-            validity=get_kite().VALIDITY_DAY,
+            order_type=kite.ORDER_TYPE_LIMIT, price=price,
+            product=kite.PRODUCT_MIS, validity=kite.VALIDITY_DAY,
         )
-        logger.warning(f"Rolled back / exited {sym}")
+        logger.warning(f"Rolled back / exited {sym} @ limit {price}")
     except Exception as e:
         logger.error(f"Market exit failed for {sym}: {e}")
 
@@ -208,15 +241,19 @@ def exit_equity_position(symbol, quantity, sl_order_id=None) -> bool:
     exit_side = kite.TRANSACTION_TYPE_SELL if quantity > 0 else kite.TRANSACTION_TYPE_BUY
     if sl_order_id:
         cancel_order(sl_order_id)
+    price = _exit_limit(sym, exit_side)
+    if not price:
+        logger.error(f"exit_equity_position: no LTP for {sym} — cannot price exit")
+        return False
     try:
         kite.place_order(
             kite.VARIETY_REGULAR,
             tradingsymbol=sym, exchange=kite.EXCHANGE_NSE,
             transaction_type=exit_side, quantity=abs(int(quantity)),
-            order_type=kite.ORDER_TYPE_MARKET, product=kite.PRODUCT_MIS,
-            validity=kite.VALIDITY_DAY,
+            order_type=kite.ORDER_TYPE_LIMIT, price=price,
+            product=kite.PRODUCT_MIS, validity=kite.VALIDITY_DAY,
         )
-        logger.info(f"Exited equity position: {sym}")
+        logger.info(f"Exited equity position: {sym} @ limit {price}")
         return True
     except Exception as e:
         logger.error(f"exit_equity_position failed for {sym}: {e}")
